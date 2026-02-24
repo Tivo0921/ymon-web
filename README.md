@@ -34,3 +34,6 @@ cd apps/web
 npm install
 npm run dev
 ```
+
+## 更新履歴
+2026-02-25 HMD-A join
