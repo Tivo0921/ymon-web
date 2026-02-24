@@ -1,54 +1,36 @@
-\# YNU Monsters (MVP)
+# YNU Monsters (MVP)
 
+## 概要
 
+シンプルな3v3バトルゲムです。マッチメイキング機能を搭載しています。
 
-\## Overview
+## 技術スタック
 
-Simple 3v3 battle game with matchmaking.
+- Next.js (App Router)
+- Express
+- Supabase (Postgres)
 
+## 現在の機能
 
+- ユーザーの作成・取得（ハンドル名ベース）
+- マッチメイキング（べき等、競合状態対応）
+- 3v3バトルシミュレーション
+- バトル結果のDB保存
 
-\## Stack
+## ローカルセットアップ
 
-\- Next.js (App Router)
+### APIサーバ
 
-\- Express
-
-\- Supabase (Postgres)
-
-
-
-\## Current Features
-
-\- User create/get by handle
-
-\- Matchmaking (idempotent, race-safe)
-
-\- 3v3 battle simulation
-
-\- Battle result stored in DB
-
-
-
-\## Local Setup
-
-
-
-\### API
-
+```bash
 cd apps/api
-
 npm install
-
 npm run dev
+```
 
+### Webアプリ
 
-
-\### Web
-
+```bash
 cd apps/web
-
 npm install
-
 npm run dev
-
+```
