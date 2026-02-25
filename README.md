@@ -17,6 +17,14 @@
 - 3v3バトルシミュレーション
 - バトル結果のDB保存
 
+## 現在の画面遷移
+- /: POST api/usersが成功したら/matchmakingへ
+- /matchmaking:POST 
+- /matches/[matchId]
+
+<img width="1536" height="836" alt="image" src="https://github.com/user-attachments/assets/f41fb03c-7501-446a-a2a4-27875f9dc422" />
+
+
 ## ローカルセットアップ
 
 ### APIサーバ
