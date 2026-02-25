@@ -96,10 +96,11 @@ export default function MatchmakingPage() {
             <h1>matchmaking</h1>
             <p>handle: <b>{handle}</b> / mode: <b>{mode}</b></p>
 
-            <div style={{ display: "flex", gap: 8, margin: "12px 0" }}>
+            <div style={{ display: "flex", gap: 8, margin: "12px 0", flexWrap: "wrap" }}>
                 <button onClick={join} style={{ padding: 10 }}>join</button>
                 <button onClick={leave} style={{ padding: 10 }}>leave</button>
                 <button onClick={refresh} style={{ padding: 10 }}>refresh</button>
+                <button onClick={() => router.push(`/reviews?handle=${encodeURIComponent(handle)}`)} style={{ padding: 10 }}>📖 レビューページ</button>
             </div>
 
             {err && <div style={{ color: "crimson" }}>{err}</div>}

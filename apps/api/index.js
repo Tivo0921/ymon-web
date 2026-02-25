@@ -420,20 +420,39 @@ app.get("/api/matchmaking/status/:handle", async (req, res) => {
 
         if (q.error) return res.status(500).json({ error: q.error.message });
 
-        // 直近のmatch（p1/p2どちらでも）
+        // 直近でstatus="created"のmatch（battleが in_progress 或いは存在しないもの）
         const m = await supabase
             .from("matches")
             .select("id, p1_user_id, p2_user_id, status, created_at")
             .or(`p1_user_id.eq.${userId},p2_user_id.eq.${userId}`)
-            .order("created_at", { ascending: false })
-            .limit(1);
+            .eq("status", "created")
+            .order("created_at", { ascending: false });
 
         if (m.error) return res.status(500).json({ error: m.error.message });
+
+        // 各matchに対応するbattleをチェックして、バトル未開始のものだけを返す
+        let validMatch = null;
+        for (const match of m.data || []) {
+            const b = await supabase
+                .from("battles")
+                .select("id, status")
+                .eq("match_id", match.id)
+                .maybeSingle();
+
+            if (b.error) continue;
+
+            // battleが存在しない（バトル未開始）のみを有効と判定
+            // in_progressやcompletedは使用可能ではないので除外
+            if (!b.data) {
+                validMatch = match;
+                break;
+            }
+        }
 
         return res.json({
             queued: !!q.data,
             queue: q.data ?? null,
-            latest_match: (m.data ?? [])[0] ?? null
+            latest_match: validMatch ?? null
         });
     } catch (e) {
         return res.status(500).json({ error: String(e) });
@@ -450,6 +469,106 @@ app.get("/debug/users", async (_req, res) => {
 
     if (error) return res.status(500).json({ error: error.message });
     return res.json({ data });
+});
+
+// ===== Reviews (授業レビュー) =====
+
+/** 授業一覧取得 */
+app.get("/api/courses", async (_req, res) => {
+    try {
+        const courses = await supabase
+            .from("courses")
+            .select("id, key, display_name, category, created_at")
+            .order("created_at", { ascending: true });
+
+        if (courses.error) {
+            return res.status(500).json({ error: courses.error.message });
+        }
+
+        res.json({ data: courses.data ?? [] });
+    } catch (e) {
+        res.status(500).json({ error: String(e) });
+    }
+});
+
+/** 授業追加 */
+app.post("/api/courses", async (req, res) => {
+    try {
+        const { key, display_name, category } = req.body ?? {};
+
+        if (!key || !display_name || !category) {
+            return res.status(400).json({ error: "key, display_name, and category are required" });
+        }
+
+        const course = await supabase
+            .from("courses")
+            .insert([{
+                key: key.trim(),
+                display_name: display_name.trim(),
+                category: category.trim()
+            }])
+            .select("id, key, display_name, category, created_at")
+            .single();
+
+        if (course.error) {
+            return res.status(500).json({ error: course.error.message });
+        }
+
+        res.status(201).json({ data: course.data });
+    } catch (e) {
+        res.status(500).json({ error: String(e) });
+    }
+});
+
+/** 授業別レビュー取得 */
+app.get("/api/reviews/:courseKey", async (req, res) => {
+    try {
+        const courseKey = decodeURIComponent(req.params.courseKey);
+
+        const reviews = await supabase
+            .from("reviews")
+            .select("id, course_key, author_handle, rating, comment, created_at")
+            .eq("course_key", courseKey)
+            .order("created_at", { ascending: false });
+
+        if (reviews.error) {
+            return res.status(500).json({ error: reviews.error.message });
+        }
+
+        res.json({ data: reviews.data ?? [] });
+    } catch (e) {
+        res.status(500).json({ error: String(e) });
+    }
+});
+
+/** レビュー投稿 */
+app.post("/api/reviews", async (req, res) => {
+    try {
+        const { handle, course_key, rating, comment } = req.body ?? {};
+
+        if (!handle || !course_key || !rating || !comment) {
+            return res.status(400).json({ error: "handle, course_key, rating, comment are required" });
+        }
+
+        const review = await supabase
+            .from("reviews")
+            .insert([{
+                course_key,
+                author_handle: handle,
+                rating: Math.max(1, Math.min(5, rating)),
+                comment
+            }])
+            .select("id, course_key, author_handle, rating, comment, created_at")
+            .single();
+
+        if (review.error) {
+            return res.status(500).json({ error: review.error.message });
+        }
+
+        res.status(201).json({ data: review.data });
+    } catch (e) {
+        res.status(500).json({ error: String(e) });
+    }
 });
 
 const port = process.env.PORT || 3001;
@@ -504,42 +623,20 @@ function simulateBattle(p1, p2) {
     };
 }
 
+// ===== ターン制バトル初期化 =====
 app.post("/api/matches/:matchId/battle", async (req, res) => {
     try {
         const matchId = req.params.matchId;
+        const { p1_team_keys, p2_team_keys } = req.body ?? {};
 
-        const {
-            p1_team_keys,
-            p2_team_keys,
-            p1_professor_key,
-            p2_professor_key,
-            seed
-        } = req.body ?? {};
-
-        // 単体指定も後方互換で許す（ただしMVPは3v3固定）
-        const team1Keys = Array.isArray(p1_team_keys)
-            ? p1_team_keys
-            : p1_professor_key
-                ? [p1_professor_key]
-                : null;
-
-        const team2Keys = Array.isArray(p2_team_keys)
-            ? p2_team_keys
-            : p2_professor_key
-                ? [p2_professor_key]
-                : null;
-
-        if (!team1Keys || !team2Keys) {
-            return res.status(400).json({ error: "team keys are required" });
+        if (!Array.isArray(p1_team_keys) || !Array.isArray(p2_team_keys)) {
+            return res.status(400).json({ error: "p1_team_keys and p2_team_keys must be arrays" });
         }
-        if (team1Keys.length !== team2Keys.length) {
-            return res.status(400).json({ error: "team size mismatch" });
-        }
-        if (team1Keys.length !== 3) {
-            return res.status(400).json({ error: "MVP requires 3v3 (length=3)" });
+        if (p1_team_keys.length !== 3 || p2_team_keys.length !== 3) {
+            return res.status(400).json({ error: "MVP requires 3v3" });
         }
 
-        // match取得
+        // match 取得
         const m = await supabase
             .from("matches")
             .select("id, p1_user_id, p2_user_id, status")
@@ -549,47 +646,34 @@ app.post("/api/matches/:matchId/battle", async (req, res) => {
         if (m.error) return res.status(500).json({ error: m.error.message });
         if (!m.data) return res.status(404).json({ error: "match not found" });
 
-        // ========== ここに入れる：既存battleがあれば返す（idempotent） ==========
+        // 既存バトルをチェック（in_progress中は再開）
         const existingBattle = await supabase
             .from("battles")
-            .select("id, match_id, seed, state_json, status, created_at")
+            .select("id, status")
             .eq("match_id", matchId)
-            .order("created_at", { ascending: false })
-            .limit(1);
+            .maybeSingle();
 
-        if (existingBattle.error) {
-            return res.status(500).json({ error: existingBattle.error.message });
-        }
-
-        const battle = (existingBattle.data ?? [])[0] ?? null;
-        if (battle) {
-            const existingResult = await supabase
-                .from("results")
-                .select("battle_id, winner_user_id, summary_json, created_at")
-                .eq("battle_id", battle.id)
-                .maybeSingle();
-
-            if (existingResult.error) {
-                return res.status(500).json({ error: existingResult.error.message });
+        if (existingBattle.error) return res.status(500).json({ error: existingBattle.error.message });
+        if (existingBattle.data) {
+            // in_progress なら再開
+            if (existingBattle.data.status === "in_progress") {
+                return res.status(200).json({ battleId: existingBattle.data.id, status: "in_progress" });
             }
-
-            return res.status(200).json({
-                battle,
-                result: existingResult.data ?? null,
-                idempotent: true
-            });
+            // completed なら新しいバトル作成不可（既にこのマッチは終了）
+            if (existingBattle.data.status === "completed") {
+                return res.status(400).json({ error: "This match's battle has already been completed. Please create a new match via matchmaking." });
+            }
         }
-        // ========== idempotent block ここまで ==========
 
         // 所有チェック
         const owned1 = await supabase
             .from("user_professors")
             .select("professor_key")
             .eq("user_id", m.data.p1_user_id)
-            .in("professor_key", team1Keys);
+            .in("professor_key", p1_team_keys);
 
         if (owned1.error) return res.status(500).json({ error: owned1.error.message });
-        if ((owned1.data ?? []).length !== team1Keys.length) {
+        if ((owned1.data ?? []).length !== p1_team_keys.length) {
             return res.status(400).json({ error: "p1 does not own all selected professors" });
         }
 
@@ -597,100 +681,327 @@ app.post("/api/matches/:matchId/battle", async (req, res) => {
             .from("user_professors")
             .select("professor_key")
             .eq("user_id", m.data.p2_user_id)
-            .in("professor_key", team2Keys);
+            .in("professor_key", p2_team_keys);
 
         if (owned2.error) return res.status(500).json({ error: owned2.error.message });
-        if ((owned2.data ?? []).length !== team2Keys.length) {
+        if ((owned2.data ?? []).length !== p2_team_keys.length) {
             return res.status(400).json({ error: "p2 does not own all selected professors" });
         }
 
         // マスタからチーム構築
         const masters = loadProfessors();
-        const team1 = team1Keys.map((k) => getProfessorByKey(masters, k));
-        const team2 = team2Keys.map((k) => getProfessorByKey(masters, k));
+        const team1 = p1_team_keys.map((k) => getProfessorByKey(masters, k));
+        const team2 = p2_team_keys.map((k) => getProfessorByKey(masters, k));
 
-        // シミュレーション（3v3）
-        const sim = simulateTeamBattle(team1, team2);
-        const winnerUserId = sim.winner === "p1" ? m.data.p1_user_id : m.data.p2_user_id;
-
-        // battles insert（ここで unique(match_id) により二重作成が防がれる）
-        const b = await supabase
+        // battle 作成
+        const battleInsert = await supabase
             .from("battles")
-            .insert([
-                {
-                    match_id: matchId,
-                    seed: seed ?? null,
-                    state_json: {
-                        p1_team_keys: team1Keys,
-                        p2_team_keys: team2Keys
-                    },
-                    status: "done"
-                }
-            ])
-            .select("id, match_id, seed, status, created_at")
+            .insert([{
+                match_id: matchId,
+                status: "in_progress",
+                current_turn: 0,
+                p1_team_keys,
+                p2_team_keys
+            }])
+            .select("id")
             .single();
 
-        // ========== ここに入れる：ユニーク違反なら既存を返す ==========
-        if (b.error) {
-            const msg = String(b.error.message ?? "");
-            if (
-                msg.includes("duplicate") ||
-                msg.includes("unique") ||
-                msg.includes("battles_match_id_unique")
-            ) {
-                const eb = await supabase
+        let battleId;
+        if (battleInsert.error) {
+            // ユニーク制約エラーなら、既に別のリクエストがバトルを作った可能性
+            if (String(battleInsert.error.message).includes("unique") || String(battleInsert.error.message).includes("duplicate")) {
+                const existingBattle2 = await supabase
                     .from("battles")
-                    .select("id, match_id, seed, state_json, status, created_at")
+                    .select("id")
                     .eq("match_id", matchId)
-                    .order("created_at", { ascending: false })
-                    .limit(1);
+                    .eq("status", "in_progress")
+                    .maybeSingle();
 
-                if (eb.error) return res.status(500).json({ error: eb.error.message });
-
-                const battle2 = (eb.data ?? [])[0] ?? null;
-
-                const er = battle2
-                    ? await supabase
-                        .from("results")
-                        .select("battle_id, winner_user_id, summary_json, created_at")
-                        .eq("battle_id", battle2.id)
-                        .maybeSingle()
-                    : { data: null, error: null };
-
-                if (er.error) return res.status(500).json({ error: er.error.message });
-
-                return res.status(200).json({
-                    battle: battle2,
-                    result: er.data ?? null,
-                    idempotent: true
-                });
-            }
-
-            return res.status(500).json({ error: b.error.message });
-        }
-        // ========== unique fallback ここまで ==========
-
-        // results insert
-        const r = await supabase
-            .from("results")
-            .insert([
-                {
-                    battle_id: b.data.id,
-                    winner_user_id: winnerUserId,
-                    summary_json: sim
+                if (existingBattle2.error) return res.status(500).json({ error: existingBattle2.error.message });
+                if (existingBattle2.data) {
+                    return res.status(200).json({ battleId: existingBattle2.data.id, status: "in_progress" });
                 }
-            ])
-            .select("battle_id, winner_user_id, summary_json, created_at")
+            }
+            return res.status(500).json({ error: battleInsert.error.message });
+        }
+        battleId = battleInsert.data.id;
+
+        // battle_state 初期化（SPD順で初手決定）
+        const initialP1Team = team1.map(p => ({ key: p.key, cur_hp: p.hp, hp: p.hp, atk: p.atk, def: p.def, spd: p.spd }));
+        const initialP2Team = team2.map(p => ({ key: p.key, cur_hp: p.hp, hp: p.hp, atk: p.atk, def: p.def, spd: p.spd }));
+
+        const stateInsert = await supabase
+            .from("battle_states")
+            .insert([{
+                battle_id: battleId,
+                p1_team_json: initialP1Team,
+                p2_team_json: initialP2Team,
+                p1_active_index: 0,
+                p2_active_index: 0,
+                current_turn_side: "p1",
+                round_number: 1,
+                round_speed_order: null
+            }])
+            .select("id")
             .single();
 
-        if (r.error) return res.status(500).json({ error: r.error.message });
+        if (stateInsert.error) return res.status(500).json({ error: stateInsert.error.message });
 
-        // matchesをdoneに（best-effort）
-        await supabase.from("matches").update({ status: "done" }).eq("id", matchId);
+        return res.status(201).json({ battleId, status: "in_progress" });
+    } catch (e) {
+        return res.status(500).json({ error: String(e) });
+    }
+});
+
+// ===== バトル状態取得 =====
+app.get("/api/battles/:battleId", async (req, res) => {
+    try {
+        const battleId = req.params.battleId;
+
+        const battle = await supabase
+            .from("battles")
+            .select("id, match_id, status, current_turn, p1_team_keys, p2_team_keys")
+            .eq("id", battleId)
+            .maybeSingle();
+
+        if (battle.error) return res.status(500).json({ error: battle.error.message });
+        if (!battle.data) return res.status(404).json({ error: "battle not found" });
+
+        const state = await supabase
+            .from("battle_states")
+            .select("p1_team_json, p2_team_json, p1_active_index, p2_active_index, current_turn_side, round_number, round_speed_order")
+            .eq("battle_id", battleId)
+            .maybeSingle();
+
+        if (state.error) return res.status(500).json({ error: state.error.message });
+
+        const turns = await supabase
+            .from("battle_turns")
+            .select("*")
+            .eq("battle_id", battleId)
+            .order("turn_number", { ascending: true });
+
+        if (turns.error) return res.status(500).json({ error: turns.error.message });
 
         return res.json({
-            battle: b.data,
-            result: r.data
+            battleId,
+            status: battle.data.status,
+            currentTurn: battle.data.current_turn,
+            currentTurnSide: state.data?.current_turn_side ?? "p1",
+            roundNumber: state.data?.round_number ?? 1,
+            p1TeamKeys: battle.data.p1_team_keys,
+            p2TeamKeys: battle.data.p2_team_keys,
+            p1Team: state.data?.p1_team_json ?? [],
+            p2Team: state.data?.p2_team_json ?? [],
+            p1ActiveIndex: state.data?.p1_active_index ?? 0,
+            p2ActiveIndex: state.data?.p2_active_index ?? 0,
+            turns: turns.data ?? []
+        });
+    } catch (e) {
+        return res.status(500).json({ error: String(e) });
+    }
+});
+
+// ===== ターン進行 =====
+app.post("/api/battles/:battleId/next-turn", async (req, res) => {
+    try {
+        const battleId = req.params.battleId;
+        const { action, target_index } = req.body ?? {};
+
+        if (!action || !["attack", "switch"].includes(action)) {
+            return res.status(400).json({ error: "action must be 'attack' or 'switch'" });
+        }
+
+        const battle = await supabase
+            .from("battles")
+            .select("id, status, current_turn, p1_team_keys, p2_team_keys")
+            .eq("id", battleId)
+            .maybeSingle();
+
+        if (battle.error) return res.status(500).json({ error: battle.error.message });
+        if (!battle.data) return res.status(404).json({ error: "battle not found" });
+        if (battle.data.status !== "in_progress") {
+            return res.status(400).json({ error: "battle is not in progress" });
+        }
+
+        const state = await supabase
+            .from("battle_states")
+            .select("*")
+            .eq("battle_id", battleId)
+            .maybeSingle();
+
+        if (state.error) return res.status(500).json({ error: state.error.message });
+        if (!state.data) return res.status(404).json({ error: "battle state not found" });
+
+        const p1Team = state.data.p1_team_json;
+        const p2Team = state.data.p2_team_json;
+        let p1Idx = state.data.p1_active_index;
+        let p2Idx = state.data.p2_active_index;
+
+        // current_turn_side の初期化（互換性のため）
+        let currentTurnSide = state.data.current_turn_side ?? "p1";
+        let roundNumber = state.data.round_number ?? 1;
+        let roundSpeedOrder = state.data.round_speed_order;
+
+        // ラウンド開始時に SPD 比較してあったかなかったか決定
+        if (!roundSpeedOrder) {
+            const p1Speed = p1Team[p1Idx]?.spd ?? 0;
+            const p2Speed = p2Team[p2Idx]?.spd ?? 0;
+            roundSpeedOrder = p1Speed >= p2Speed ? "p1_first" : "p2_first";
+            currentTurnSide = roundSpeedOrder === "p1_first" ? "p1" : "p2";
+        }
+
+        // アクティブキャラの生死確認
+        const nextAlive = (team, idx) => {
+            let i = idx;
+            while (i < team.length && team[i].cur_hp <= 0) i++;
+            return i;
+        };
+
+        p1Idx = nextAlive(p1Team, p1Idx);
+        p2Idx = nextAlive(p2Team, p2Idx);
+
+        // バトル終了判定
+        if (p1Idx >= p1Team.length || p2Idx >= p2Team.length) {
+            const winner = p1Idx < p1Team.length ? "p1" : "p2";
+            await supabase.from("battles").update({ status: "completed" }).eq("id", battleId);
+            return res.json({ status: "completed", winner });
+        }
+
+        // ターンのプレイヤーが正しいか確認
+        const playerTakingTurn = currentTurnSide;
+        let eventRecord = null;
+
+        if (action === "switch") {
+            // スイッチアクション
+            if (target_index === null || target_index === undefined) {
+                return res.status(400).json({ error: "target_index required for switch action" });
+            }
+
+            if (playerTakingTurn === "p1") {
+                if (target_index < 0 || target_index >= p1Team.length) {
+                    return res.status(400).json({ error: "invalid target_index for p1" });
+                }
+                if (p1Team[target_index].cur_hp <= 0) {
+                    return res.status(400).json({ error: "target professor is fainted" });
+                }
+                p1Idx = target_index;
+            } else {
+                if (target_index < 0 || target_index >= p2Team.length) {
+                    return res.status(400).json({ error: "invalid target_index for p2" });
+                }
+                if (p2Team[target_index].cur_hp <= 0) {
+                    return res.status(400).json({ error: "target professor is fainted" });
+                }
+                p2Idx = target_index;
+            }
+
+            eventRecord = {
+                battle_id: battleId,
+                turn_number: battle.data.current_turn + 1,
+                attacker_side: playerTakingTurn,
+                attacker_key: playerTakingTurn === "p1" ? p1Team[p1Idx].key : p2Team[p2Idx].key,
+                defender_key: null,
+                damage_dealt: 0,
+                defender_hp_after: null,
+                event: "switch"
+            };
+        } else {
+            // 攻撃アクション
+            if (target_index === null || target_index === undefined) {
+                return res.status(400).json({ error: "target_index required for attack action" });
+            }
+
+            const dmg = (att, def) => Math.max(1, att.atk - Math.floor(def.def / 2));
+            let atkKey, defKey, damage, defenderTeam, defenderIdx;
+
+            if (playerTakingTurn === "p1") {
+                if (target_index < 0 || target_index >= p2Team.length) {
+                    return res.status(400).json({ error: "invalid target_index" });
+                }
+                if (p2Team[target_index].cur_hp <= 0) {
+                    return res.status(400).json({ error: "target is already fainted" });
+                }
+                atkKey = p1Team[p1Idx].key;
+                defKey = p2Team[target_index].key;
+                damage = dmg(p1Team[p1Idx], p2Team[target_index]);
+                p2Team[target_index].cur_hp = Math.max(0, p2Team[target_index].cur_hp - damage);
+                defenderTeam = p2Team;
+                defenderIdx = target_index;
+            } else {
+                if (target_index < 0 || target_index >= p1Team.length) {
+                    return res.status(400).json({ error: "invalid target_index" });
+                }
+                if (p1Team[target_index].cur_hp <= 0) {
+                    return res.status(400).json({ error: "target is already fainted" });
+                }
+                atkKey = p2Team[p2Idx].key;
+                defKey = p1Team[target_index].key;
+                damage = dmg(p2Team[p2Idx], p1Team[target_index]);
+                p1Team[target_index].cur_hp = Math.max(0, p1Team[target_index].cur_hp - damage);
+                defenderTeam = p1Team;
+                defenderIdx = target_index;
+            }
+
+            eventRecord = {
+                battle_id: battleId,
+                turn_number: battle.data.current_turn + 1,
+                attacker_side: playerTakingTurn,
+                attacker_key: atkKey,
+                defender_key: defKey,
+                damage_dealt: damage,
+                defender_hp_after: defenderTeam[defenderIdx].cur_hp,
+                event: defenderTeam[defenderIdx].cur_hp <= 0 ? "faint" : "attack"
+            };
+        }
+
+        // ターン記録（攻撃のみ。交替は記録しない）
+        if (action === "attack") {
+            const turnInsert = await supabase
+                .from("battle_turns")
+                .insert([eventRecord])
+                .select("*")
+                .single();
+
+            if (turnInsert.error) return res.status(500).json({ error: turnInsert.error.message });
+        }
+
+        // 次のターンサイドを決定
+        let nextTurnSide = currentTurnSide === "p1" ? "p2" : "p1";
+        let nextRoundNumber = roundNumber;
+        let nextRoundSpeedOrder = roundSpeedOrder;
+
+        // P1, P2 両方が行動したらラウンド終了
+        if (nextTurnSide === "p1") {
+            // P2 が終わったので、ラウンド開始
+            nextRoundNumber = roundNumber + 1;
+            nextRoundSpeedOrder = null; // 次のラウンド開始時に再計算
+        }
+
+        // state 更新
+        const stateUpdate = await supabase
+            .from("battle_states")
+            .update({
+                p1_team_json: p1Team,
+                p2_team_json: p2Team,
+                p1_active_index: p1Idx,
+                p2_active_index: p2Idx,
+                current_turn_side: nextTurnSide,
+                round_number: nextRoundNumber,
+                round_speed_order: nextRoundSpeedOrder
+            })
+            .eq("battle_id", battleId);
+
+        if (stateUpdate.error) return res.status(500).json({ error: stateUpdate.error.message });
+
+        // battle ターン数更新
+        await supabase.from("battles").update({ current_turn: battle.data.current_turn + 1 }).eq("id", battleId);
+
+        return res.json({
+            status: "in_progress",
+            action,
+            currentTurnSide: nextTurnSide,
+            gameOver: false
         });
     } catch (e) {
         return res.status(500).json({ error: String(e) });
@@ -848,3 +1159,34 @@ function simulateTeamBattle(team1, team2) {
         log,
     };
 }
+
+// ====== DEBUG ======
+app.get("/api/debug/match/:matchId", async (req, res) => {
+    try {
+        const matchId = req.params.matchId;
+
+        const m = await supabase
+            .from("matches")
+            .select("*")
+            .eq("id", matchId)
+            .maybeSingle();
+
+        const b = await supabase
+            .from("battles")
+            .select("*")
+            .eq("match_id", matchId);
+
+        const s = await supabase
+            .from("battle_states")
+            .select("*")
+            .in("battle_id", (b.data ?? []).map(x => x.id));
+
+        return res.json({
+            match: m.data,
+            battles: b.data,
+            battle_states: s.data
+        });
+    } catch (e) {
+        return res.status(500).json({ error: String(e) });
+    }
+});
