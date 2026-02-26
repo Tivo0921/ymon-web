@@ -1,0 +1,87 @@
+version: '3.8'
+
+services:
+  # API サーバー
+  api:
+    build:
+      context: ./apps/api
+      dockerfile: Dockerfile
+    container_name: ymon-api
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=development
+      - PORT=3001
+      - SUPABASE_URL=${SUPABASE_URL}
+      - SUPABASE_SERVICE_ROLE_KEY=${SUPABASE_SERVICE_ROLE_KEY}
+    volumes:
+      - ./apps/api:/app
+      # node_modules はホストのものを使わない
+      - /app/node_modules
+    command: node index.js
+    networks:
+      - ymon-network
+    depends_on:
+      - postgres  # オプション: ローカルDB使用時
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3001/health', (r) => {if (r.statusCode !== 200) throw new Error(r.statusCode)})"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Web サーバー (Next.js)
+  web:
+    build:
+      context: ./apps/web
+      dockerfile: Dockerfile
+    container_name: ymon-web
+    ports:
+      - "3000:3000"
+    environment:
+      - NODE_ENV=development
+    volumes:
+      - ./apps/web:/app
+      # node_modules はホストのものを使わない
+      - /app/node_modules
+      # .next も無視
+      - /app/.next
+    command: npm run dev
+    networks:
+      - ymon-network
+    depends_on:
+      - api
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # PostgreSQL データベース (オプション: ローカル開発用)
+  postgres:
+    image: postgres:16-alpine
+    container_name: ymon-postgres
+    environment:
+      POSTGRES_USER: ymon_user
+      POSTGRES_PASSWORD: ymon_password
+      POSTGRES_DB: ymon_db
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - ymon-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ymon_user"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+networks:
+  ymon-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
