@@ -4,8 +4,21 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { apiFetch } from "@/lib/api";
 
-type QueueRow = { id: string; user_id: string; mode: string; queued_at: string };
+type LobbyPlayer = {
+    user_id: string;
+    user: { id: string; handle: string; display_name: string; created_at: string } | null;
+    mode: string;
+    queued_at: string;
+};
+
 type MatchRow = { id: string; p1_user_id: string; p2_user_id: string; status: string; created_at: string };
+
+type Invitation = {
+    invitation_id: string;
+    inviter: { id: string; handle: string; display_name: string } | null;
+    status: string;
+    created_at: string;
+};
 
 export default function MatchmakingPage() {
     const sp = useSearchParams();
@@ -13,74 +26,162 @@ export default function MatchmakingPage() {
     const handle = sp.get("handle") ?? "";
     const mode = useMemo(() => sp.get("mode") ?? "casual", [sp]);
 
-    const [status, setStatus] = useState<{
-        queued: boolean;
-        queue: QueueRow | null;
-        latest_match: MatchRow | null;
-    } | null>(null);
-
+    const [lobbyPlayers, setLobbyPlayers] = useState<LobbyPlayer[]>([]);
+    const [isQueued, setIsQueued] = useState(false);
     const [err, setErr] = useState<string | null>(null);
+    const [loading, setLoading] = useState(false);
+    const [invitation, setInvitation] = useState<Invitation | null>(null);
+    const [sentInvitedToUserId, setSentInvitedToUserId] = useState<string | null>(null);
 
-    const refresh = async () => {
-        if (!handle) return;
+    const refreshLobby = async () => {
+        if (!mode) return;
         try {
-            const s = await apiFetch(`/api/matchmaking/status/${encodeURIComponent(handle)}`);
-            setStatus(s);
+            setLoading(true);
+            const { data } = await apiFetch(`/api/matchmaking/lobby/${encodeURIComponent(mode)}`);
+            setLobbyPlayers(data ?? []);
+
+            // ロビーから自分を探して、isQueued の状態を更新
+            const meInLobby = (data ?? []).find(p => p.user?.handle === handle);
+            setIsQueued(!!meInLobby);
         } catch (e: any) {
             setErr(e?.message ?? String(e));
+        } finally {
+            setLoading(false);
         }
     };
 
-    const join = async () => {
+    const joinLobby = async () => {
         setErr(null);
         try {
-            const r = await apiFetch<any>("/api/matchmaking/join", {
+            await apiFetch("/api/matchmaking/join", {
                 method: "POST",
                 body: JSON.stringify({ handle, mode }),
             });
-
-            // matched なら即遷移
-            if (r?.matched && r?.match?.id) {
-                router.push(`/matches/${r.match.id}?handle=${encodeURIComponent(handle)}`);
-                return;
-            }
-            await refresh();
+            setIsQueued(true);
+            await refreshLobby();
         } catch (e: any) {
             setErr(e?.message ?? String(e));
         }
     };
 
-    const leave = async () => {
+    const invitePlayer = async (opponentUserId: string) => {
+        setErr(null);
+
+        // ロビーに入っているか確認
+        if (!isQueued) {
+            setErr("ロビーに参加してから招待してください");
+            return;
+        }
+
+        // 既に招待中の場合はスキップ
+        if (sentInvitedToUserId) {
+            setErr("既に他のプレイヤーを招待中です。結果を待ってください。");
+            return;
+        }
+
+        try {
+            // 招待通知を送る（マッチングはしない、相手の承認待ち）
+            await apiFetch("/api/matchmaking/invite", {
+                method: "POST",
+                body: JSON.stringify({ handle, opponent_user_id: opponentUserId }),
+            });
+
+            // 招待した相手を記録（ポーリングで承認を待つため）
+            setSentInvitedToUserId(opponentUserId);
+            setErr(null);
+        } catch (e: any) {
+            setErr(e?.message ?? String(e));
+        }
+    };
+
+    const leaveLobby = async () => {
         setErr(null);
         try {
             await apiFetch("/api/matchmaking/leave", {
                 method: "POST",
                 body: JSON.stringify({ handle }),
             });
-            await refresh();
+            setIsQueued(false);
+            await refreshLobby();
         } catch (e: any) {
             setErr(e?.message ?? String(e));
         }
     };
 
-    // ポーリング（queued中だけ）
-    useEffect(() => {
-        refresh();
-        const t = setInterval(() => {
-            if (status?.queued) refresh();
-        }, 2000);
-        return () => clearInterval(t);
-        // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [handle, status?.queued]);
+    // 招待通知をチェック（招待された側用）
+    const checkInvitations = async () => {
+        if (!handle) return;
+        try {
+            const res = await apiFetch(`/api/matchmaking/invitations/${encodeURIComponent(handle)}`);
+            const invitations = res?.data ?? [];
 
-    // status.latest_match が created で、自分が queued じゃなければ遷移
-    useEffect(() => {
-        const m = status?.latest_match;
-        if (!m) return;
-        if (m.status === "created" && !status?.queued) {
-            router.push(`/matches/${m.id}?handle=${encodeURIComponent(handle)}`);
+            // 最初の pending 招待を表示
+            const firstInvitation = invitations.find((inv: any) => inv.status === "pending");
+            setInvitation(firstInvitation ?? null);
+        } catch (e: any) {
+            // エラーは無視
         }
-    }, [status, handle, router]);
+    };
+
+    // 招待が成立したかチェック（招待した側用）
+    // 相手が承認してマッチが作成されると、自分がロビーから削除されるので、それをトリガーに遷移
+    const checkIfInviteAccepted = async () => {
+        if (!sentInvitedToUserId || !handle) return;
+        try {
+            const status = await apiFetch(`/api/matchmaking/status/${encodeURIComponent(handle)}`);
+
+            // 自分が送った招待が accepted された「かつ」自分がロビーから削除された場合
+            if (status?.invitation_accepted && !status?.queued && status?.latest_match) {
+                router.push(`/matches/${status.latest_match.id}?handle=${encodeURIComponent(handle)}`);
+            }
+        } catch (e: any) {
+            // エラーは無視
+        }
+    };
+
+    // 招待を承認（マッチング成立）
+    const acceptInvite = async (invitationId: string) => {
+        setErr(null);
+        try {
+            const r = await apiFetch("/api/matchmaking/accept-invite", {
+                method: "POST",
+                body: JSON.stringify({ handle, invitation_id: invitationId }),
+            });
+
+            if (r?.matched && r?.match?.id) {
+                router.push(`/matches/${r.match.id}?handle=${encodeURIComponent(handle)}`);
+            }
+        } catch (e: any) {
+            setErr(e?.message ?? String(e));
+        }
+    };
+
+    // 招待を辞退（次のポーリングで別の招待が表示される）
+    const rejectInvite = () => {
+        setInvitation(null);
+    };
+
+    // 招待のキャンセル（招待した側が別の人に招待したい場合）
+    const cancelSentInvite = () => {
+        setSentInvitedToUserId(null);
+        setErr(null);
+    };
+
+    // 初期化とポーリング
+    useEffect(() => {
+        refreshLobby();
+        checkInvitations();
+        checkIfInviteAccepted();
+
+        const interval = setInterval(() => {
+            refreshLobby();
+            checkInvitations();
+            checkIfInviteAccepted();
+        }, 2000);
+
+        return () => clearInterval(interval);
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [mode, handle, sentInvitedToUserId]);
 
     if (!handle) {
         return (
@@ -93,24 +194,168 @@ export default function MatchmakingPage() {
 
     return (
         <main style={{ padding: 24, maxWidth: 720, margin: "0 auto" }}>
-            <h1>matchmaking</h1>
-            <p>handle: <b>{handle}</b> / mode: <b>{mode}</b></p>
+            <h1>ロビー</h1>
+            <p>あなた: <b>{handle}</b> / モード: <b>{mode}</b></p>
 
             <div style={{ display: "flex", gap: 8, margin: "12px 0", flexWrap: "wrap" }}>
-                <button onClick={join} style={{ padding: 10 }}>join</button>
-                <button onClick={leave} style={{ padding: 10 }}>leave</button>
-                <button onClick={refresh} style={{ padding: 10 }}>refresh</button>
-                <button onClick={() => router.push(`/reviews?handle=${encodeURIComponent(handle)}`)} style={{ padding: 10 }}>📖 レビューページ</button>
+                {!isQueued ? (
+                    <button onClick={joinLobby} style={{ padding: 10, fontSize: 16 }}>
+                        ロビーに参加
+                    </button>
+                ) : (
+                    <button onClick={leaveLobby} style={{ padding: 10, fontSize: 16, background: "crimson", color: "white" }}>
+                        ロビーから離脱
+                    </button>
+                )}
+                <button onClick={refreshLobby} style={{ padding: 10, fontSize: 16 }}>
+                    更新
+                </button>
+                <button onClick={() => router.push(`/reviews?handle=${encodeURIComponent(handle)}`)} style={{ padding: 10 }}>
+                    📖 レビューページ
+                </button>
             </div>
 
-            {err && <div style={{ color: "crimson" }}>{err}</div>}
+            {err && <div style={{ color: "crimson", marginBottom: 12 }}>{err}</div>}
 
-            <pre style={{ background: "#111", color: "#0f0", padding: 12, overflowX: "auto" }}>
-                {JSON.stringify(status, null, 2)}
-            </pre>
+            {loading && <p>読み込み中...</p>}
 
-            <p style={{ opacity: 0.8 }}>
-                queued=true の間は2秒ごとに status を更新する。match ができたら自動で対戦ページへ遷移する。
+            {/* === 招待確認ウィンドウ === */}
+            {invitation && (
+                <div
+                    style={{
+                        position: "fixed",
+                        top: 0,
+                        left: 0,
+                        right: 0,
+                        bottom: 0,
+                        background: "rgba(0,0,0,0.5)",
+                        display: "flex",
+                        justifyContent: "center",
+                        alignItems: "center",
+                        zIndex: 1000
+                    }}
+                >
+                    <div
+                        style={{
+                            background: "white",
+                            padding: 24,
+                            borderRadius: 8,
+                            maxWidth: 400,
+                            textAlign: "center",
+                            boxShadow: "0 4px 12px rgba(0,0,0,0.15)"
+                        }}
+                    >
+                        <h2 style={{ margin: "0 0 16px 0" }}>招待</h2>
+                        <p style={{ fontSize: 16, margin: "8px 0" }}>
+                            <b>{invitation.inviter?.display_name}</b> さんと対戦しますか？
+                        </p>
+                        <p style={{ fontSize: 12, opacity: 0.6, margin: "12px 0" }}>
+                            @{invitation.inviter?.handle}
+                        </p>
+                        <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 20 }}>
+                            <button
+                                onClick={() => acceptInvite(invitation.invitation_id)}
+                                style={{
+                                    padding: "10px 24px",
+                                    fontSize: 14,
+                                    background: "#28a745",
+                                    color: "white",
+                                    border: "none",
+                                    borderRadius: 4,
+                                    cursor: "pointer"
+                                }}
+                            >
+                                はい
+                            </button>
+                            <button
+                                onClick={rejectInvite}
+                                style={{
+                                    padding: "10px 24px",
+                                    fontSize: 14,
+                                    background: "#6c757d",
+                                    color: "white",
+                                    border: "none",
+                                    borderRadius: 4,
+                                    cursor: "pointer"
+                                }}
+                            >
+                                いいえ
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            <div style={{ marginTop: 24 }}>
+                <h2>ロビーにいるプレイヤー ({lobbyPlayers.length})</h2>
+                {sentInvitedToUserId && (
+                    <div style={{ padding: 12, background: "#fff3cd", color: "#856404", borderRadius: 4, marginBottom: 12 }}>
+                        <b>待機中...</b> 招待を送信しました。相手が承認するまでお待ちください。
+                        <button onClick={cancelSentInvite} style={{ marginLeft: 12, padding: "4px 8px", fontSize: 12, cursor: "pointer" }}>
+                            キャンセル
+                        </button>
+                    </div>
+                )}
+                {lobbyPlayers.length === 0 ? (
+                    <p style={{ opacity: 0.6 }}>プレイヤーがいません</p>
+                ) : (
+                    <div style={{ display: "grid", gap: 8 }}>
+                        {lobbyPlayers.map((player) => (
+                            <div
+                                key={player.user_id}
+                                style={{
+                                    display: "flex",
+                                    justifyContent: "space-between",
+                                    alignItems: "center",
+                                    padding: 12,
+                                    border: "1px solid #ddd",
+                                    borderRadius: 8,
+                                    background: player.user?.handle === handle ? "#f0f0f0" : "#fff",
+                                    opacity: sentInvitedToUserId ? 0.6 : 1
+                                }}
+                            >
+                                <div>
+                                    <div style={{ fontSize: 16, fontWeight: "bold" }}>
+                                        {player.user?.display_name || player.user?.handle}
+                                    </div>
+                                    <div style={{ fontSize: 12, opacity: 0.6 }}>
+                                        @{player.user?.handle}
+                                    </div>
+                                </div>
+                                {player.user?.handle !== handle && (
+                                    <button
+                                        onClick={() => invitePlayer(player.user_id)}
+                                        disabled={!isQueued || !!sentInvitedToUserId}
+                                        style={{
+                                            padding: "8px 16px",
+                                            fontSize: 12,
+                                            background:
+                                                sentInvitedToUserId ? "#ccc" :
+                                                    isQueued ? "#007bff" : "#ccc",
+                                            color: (!isQueued || sentInvitedToUserId) ? "#666" : "white",
+                                            border: "none",
+                                            borderRadius: 4,
+                                            cursor: (!isQueued || sentInvitedToUserId) ? "not-allowed" : "pointer",
+                                            opacity: (!isQueued || sentInvitedToUserId) ? 0.6 : 1
+                                        }}
+                                    >
+                                        {sentInvitedToUserId ? "待機中..." :
+                                            isQueued ? "招待" : "ロビー参加後に選択"}
+                                    </button>
+                                )}
+                                {player.user?.handle === handle && (
+                                    <div style={{ fontSize: 12, color: "green", fontWeight: "bold" }}>
+                                        あなた
+                                    </div>
+                                )}
+                            </div>
+                        ))}
+                    </div>
+                )}
+            </div>
+
+            <p style={{ opacity: 0.6, marginTop: 24 }}>
+                ロビーに参加してプレイヤーを選択して招待を送信します。相手が承認すると対戦が開始します。
             </p>
         </main>
     );
