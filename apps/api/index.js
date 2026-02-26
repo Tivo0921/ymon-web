@@ -654,7 +654,7 @@ app.get("/api/courses", async (_req, res) => {
     try {
         const courses = await supabase
             .from("courses")
-            .select("id, key, display_name, category, created_at")
+            .select("id, key, display_name, category, professor_name, created_at")
             .order("created_at", { ascending: true });
 
         if (courses.error) {
@@ -670,7 +670,7 @@ app.get("/api/courses", async (_req, res) => {
 /** 授業追加 */
 app.post("/api/courses", async (req, res) => {
     try {
-        const { key, display_name, category } = req.body ?? {};
+        const { key, display_name, category, professor_name } = req.body ?? {};
 
         if (!key || !display_name || !category) {
             return res.status(400).json({ error: "key, display_name, and category are required" });
@@ -681,9 +681,10 @@ app.post("/api/courses", async (req, res) => {
             .insert([{
                 key: key.trim(),
                 display_name: display_name.trim(),
-                category: category.trim()
+                category: category.trim(),
+                professor_name: (professor_name ?? "").trim()
             }])
-            .select("id, key, display_name, category, created_at")
+            .select("id, key, display_name, category, professor_name, created_at")
             .single();
 
         if (course.error) {

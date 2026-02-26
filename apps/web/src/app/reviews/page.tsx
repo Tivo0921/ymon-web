@@ -9,6 +9,7 @@ type Course = {
     key: string;
     display_name: string;
     category: string;
+    professor_name?: string;
     created_at: string;
 };
 
@@ -36,9 +37,18 @@ export default function ReviewsPage() {
     const [successMsg, setSuccessMsg] = useState<string | null>(null);
     const [newCourseKey, setNewCourseKey] = useState<string>("");
     const [newCourseName, setNewCourseName] = useState<string>("");
+    const [newCourseProfessorName, setNewCourseProfessorName] = useState<string>("");
     const [newCourseCategory, setNewCourseCategory] = useState<string>("専門");
     const [isAddingCourse, setIsAddingCourse] = useState(false);
+    const [searchQuery, setSearchQuery] = useState<string>("");
     const CATEGORIES = ["専門", "一般教養", "専門基礎"];
+
+    // 検索クエリに基づいて授業をフィルタリング
+    const filteredCourses = courses.filter((course) =>
+        course.display_name.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        course.key.toLowerCase().includes(searchQuery.toLowerCase()) ||
+        (course.professor_name ?? "").toLowerCase().includes(searchQuery.toLowerCase())
+    );
 
     // 授業一覧取得
     useEffect(() => {
@@ -125,6 +135,7 @@ export default function ReviewsPage() {
                     key: newCourseKey,
                     display_name: newCourseName,
                     category: newCourseCategory,
+                    professor_name: newCourseProfessorName,
                 }),
             });
 
@@ -134,6 +145,7 @@ export default function ReviewsPage() {
 
             setNewCourseKey("");
             setNewCourseName("");
+            setNewCourseProfessorName("");
             setNewCourseCategory("専門");
             setSuccessMsg("授業を追加しました！");
         } catch (e: any) {
@@ -174,11 +186,37 @@ export default function ReviewsPage() {
                 {/* 授業一覧 */}
                 <div style={{ border: "1px solid #ccc", padding: 16, borderRadius: 8 }}>
                     <h2>授業一覧</h2>
+                    
+                    {/* 検索窓 */}
+                    <div style={{ marginBottom: 16 }}>
+                        <input
+                            type="text"
+                            placeholder="授業名または教授名で検索..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
+                            style={{
+                                width: "100%",
+                                padding: 10,
+                                fontSize: 14,
+                                borderRadius: 4,
+                                border: "1px solid #ccc",
+                                boxSizing: "border-box"
+                            }}
+                        />
+                        {searchQuery && (
+                            <p style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>
+                                {filteredCourses.length} 件表示
+                            </p>
+                        )}
+                    </div>
+
                     <div style={{ display: "flex", flexDirection: "column", gap: 8, marginBottom: 16 }}>
-                        {courses.length === 0 ? (
-                            <p style={{ opacity: 0.6 }}>授業データがありません</p>
+                        {filteredCourses.length === 0 ? (
+                            <p style={{ opacity: 0.6 }}>
+                                {courses.length === 0 ? "授業データがありません" : "検索結果がありません"}
+                            </p>
                         ) : (
-                            courses.map((course) => (
+                            filteredCourses.map((course) => (
                                 <button
                                     key={course.key}
                                     onClick={() => setSelectedCourse(course)}
@@ -195,6 +233,9 @@ export default function ReviewsPage() {
                                 >
                                     <div style={{ fontWeight: "bold" }}>{course.display_name}</div>
                                     <div style={{ fontSize: 12, opacity: 0.8 }}>（{course.category}）</div>
+                                    {course.professor_name && (
+                                        <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>{course.professor_name}</div>
+                                    )}
                                 </button>
                             ))
                         )}
@@ -223,6 +264,21 @@ export default function ReviewsPage() {
                             value={newCourseName}
                             onChange={(e) => setNewCourseName(e.target.value)}
                             placeholder="授業名（例：人工知能）"
+                            style={{
+                                width: "100%",
+                                padding: 8,
+                                marginBottom: 8,
+                                fontSize: 14,
+                                borderRadius: 4,
+                                border: "1px solid #ccc",
+                                boxSizing: "border-box"
+                            }}
+                        />
+                        <input
+                            type="text"
+                            value={newCourseProfessorName}
+                            onChange={(e) => setNewCourseProfessorName(e.target.value)}
+                            placeholder="教授名（例：四方順司）"
                             style={{
                                 width: "100%",
                                 padding: 8,
