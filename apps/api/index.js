@@ -256,110 +256,27 @@ app.post("/api/matchmaking/join", async (req, res) => {
         if (already.data) {
             return res.status(200).json({
                 queued: true,
-                matched: false,
                 queue: already.data,
                 idempotent: true
             });
         }
 
-        // 2) 同じmodeで待っている相手を探す（最古を取る）
-        const opp = await getOldestQueuedRowByMode(mode);
-        if (opp.error) return res.status(500).json({ error: opp.error.message });
-        const opponentRow = (opp.data ?? [])[0] ?? null;
-
-        // 相手がいて、かつ自分じゃないならマッチ作成
-        if (opponentRow && opponentRow.user_id !== userId) {
-            // 相手をキューから消す（best-effort：消せなければ後で整合性が崩れるのでここは本当はtransactionにしたい）
-            // 相手をキューから消す（countに頼らず、残存チェックで判定する）
-            const delOpp = await supabase
-                .from("matchmaking_queue")
-                .delete()
-                .eq("id", opponentRow.id);
-
-            if (delOpp.error) return res.status(500).json({ error: delOpp.error.message });
-
-            // 本当に消えたか確認（消えていなければ相手が先に取られた可能性）
-            const stillThere = await supabase
-                .from("matchmaking_queue")
-                .select("id")
-                .eq("id", opponentRow.id)
-                .maybeSingle();
-
-            if (stillThere.error) return res.status(500).json({ error: stillThere.error.message });
-
-            if (stillThere.data) {
-                // 相手がまだいる＝自分のdeleteが効いてない（競合など）
-                // → 自分をqueueに入れる方へフォールバック（既存の3) insertと同じ）
-                const ins = await supabase
-                    .from("matchmaking_queue")
-                    .insert([{ user_id: userId, mode }])
-                    .select("id, user_id, mode, queued_at")
-                    .single();
-
-                if (ins.error) {
-                    const msg = String(ins.error.message ?? "");
-                    if (msg.includes("duplicate") || msg.includes("unique") || msg.includes("matchmaking_queue_user_id_key")) {
-                        const q2 = await getQueuedRowByUserId(userId);
-                        if (q2.error) return res.status(500).json({ error: q2.error.message });
-
-                        return res.status(200).json({
-                            queued: true,
-                            matched: false,
-                            queue: q2.data ?? null,
-                            idempotent: true
-                        });
-                    }
-                    return res.status(500).json({ error: ins.error.message });
-                }
-
-                return res.status(200).json({
-                    queued: true,
-                    matched: false,
-                    queue: ins.data,
-                    fallback: "opponent_taken"
-                });
-            }
-
-            // ここまで来たら相手は消せているので match 作成に進む
-            // matches作成
-            const match = await supabase
-                .from("matches")
-                .insert([
-                    {
-                        p1_user_id: opponentRow.user_id,
-                        p2_user_id: userId,
-                        status: "created"
-                    }
-                ])
-                .select("id, p1_user_id, p2_user_id, status, created_at")
-                .single();
-
-            if (match.error) return res.status(500).json({ error: match.error.message });
-
-            return res.status(200).json({
-                queued: false,
-                matched: true,
-                match: match.data
-            });
-        }
-
-        // 3) 相手がいないので自分をキューに入れる
+        // 2) 自分をキューに入れる（ロビーに参加）
+        // ロビー型なので自動マッチングはしず、単に追加するだけ
         const ins = await supabase
             .from("matchmaking_queue")
             .insert([{ user_id: userId, mode }])
             .select("id, user_id, mode, queued_at")
             .single();
 
-        // 3') ここがユニーク制約に引っかかることがある（レース / 連打）
         if (ins.error) {
             const msg = String(ins.error.message ?? "");
-            if (msg.includes("duplicate") || msg.includes("unique") || msg.includes("matchmaking_queue_user_id_unique")) {
+            if (msg.includes("duplicate") || msg.includes("unique") || msg.includes("matchmaking_queue_user_id_key")) {
                 const q2 = await getQueuedRowByUserId(userId);
                 if (q2.error) return res.status(500).json({ error: q2.error.message });
 
                 return res.status(200).json({
                     queued: true,
-                    matched: false,
                     queue: q2.data ?? null,
                     idempotent: true
                 });
@@ -369,7 +286,6 @@ app.post("/api/matchmaking/join", async (req, res) => {
 
         return res.status(200).json({
             queued: true,
-            matched: false,
             queue: ins.data
         });
     } catch (e) {
@@ -449,10 +365,270 @@ app.get("/api/matchmaking/status/:handle", async (req, res) => {
             }
         }
 
+        // 招待側：自分が送った招待で accepted なものをチェック
+        const sentAcceptedInvitation = await supabase
+            .from("matchmaking_invitations")
+            .select("id, invitee_user_id, status")
+            .eq("inviter_user_id", userId)
+            .eq("status", "accepted")
+            .order("created_at", { ascending: false })
+            .limit(1);
+
+        if (sentAcceptedInvitation.error) {
+            // エラーは無視（accepted 招待がないと判定）
+        }
+
         return res.json({
             queued: !!q.data,
             queue: q.data ?? null,
-            latest_match: validMatch ?? null
+            latest_match: validMatch ?? null,
+            invitation_accepted: (sentAcceptedInvitation.data?.length ?? 0) > 0
+        });
+    } catch (e) {
+        return res.status(500).json({ error: String(e) });
+    }
+});
+
+/** ロビー: キュー内のプレイヤー一覧取得 */
+app.get("/api/matchmaking/lobby/:mode", async (req, res) => {
+    try {
+        const mode = req.params.mode;
+        if (!mode) {
+            return res.status(400).json({ error: "mode is required" });
+        }
+
+        // キューに登録されているプレイヤー一覧を取得
+        const { data: queued, error } = await supabase
+            .from("matchmaking_queue")
+            .select("user_id, mode, queued_at")
+            .eq("mode", mode)
+            .order("queued_at", { ascending: true });
+
+        if (error) return res.status(500).json({ error: error.message });
+
+        // 各プレイヤーのユーザー情報を取得
+        const userIds = (queued ?? []).map(q => q.user_id);
+        if (userIds.length === 0) {
+            return res.json({ data: [] });
+        }
+
+        const { data: users, error: usersError } = await supabase
+            .from("users")
+            .select("id, handle, display_name, created_at")
+            .in("id", userIds);
+
+        if (usersError) return res.status(500).json({ error: usersError.message });
+
+        // キュー情報とユーザー情報をマージ
+        const userMap = new Map((users ?? []).map(u => [u.id, u]));
+        const lobby = (queued ?? []).map(q => ({
+            user_id: q.user_id,
+            user: userMap.get(q.user_id) ?? null,
+            mode: q.mode,
+            queued_at: q.queued_at
+        }));
+
+        return res.json({ data: lobby });
+    } catch (e) {
+        return res.status(500).json({ error: String(e) });
+    }
+});
+
+/** ロビー: 相手プレイヤーに招待通知を送信 */
+app.post("/api/matchmaking/invite", async (req, res) => {
+    try {
+        const { handle, opponent_user_id } = req.body ?? {};
+        if (!handle || !opponent_user_id) {
+            return res.status(400).json({ error: "handle and opponent_user_id are required" });
+        }
+
+        const userId = await getUserIdByHandle(handle);
+        if (!userId) return res.status(404).json({ error: "user not found" });
+
+        // 同じプレイヤーに招待できない
+        if (userId === opponent_user_id) {
+            return res.status(400).json({ error: "cannot invite yourself" });
+        }
+
+        // 相手がロビーに居るか確認
+        const oppQueue = await supabase
+            .from("matchmaking_queue")
+            .select("id, user_id, mode, queued_at")
+            .eq("user_id", opponent_user_id)
+            .maybeSingle();
+
+        if (oppQueue.error) return res.status(500).json({ error: oppQueue.error.message });
+        if (!oppQueue.data) {
+            return res.status(400).json({ error: "opponent is not in the lobby" });
+        }
+
+        // 既に pending 状態の招待があるか確認
+        const existingInvite = await supabase
+            .from("matchmaking_invitations")
+            .select("id, inviter_user_id, invitee_user_id, status, created_at")
+            .eq("inviter_user_id", userId)
+            .eq("invitee_user_id", opponent_user_id)
+            .eq("status", "pending")
+            .maybeSingle();
+
+        if (existingInvite.error) return res.status(500).json({ error: existingInvite.error.message });
+
+        // 既に pending 招待が存在する場合はそれを返す（重複防止）
+        if (existingInvite.data) {
+            return res.json({
+                invited: true,
+                invitation: existingInvite.data,
+                already_invited: true
+            });
+        }
+
+        // 新規招待通知を記録（マッチングはしない、相手の承認待ち）
+        const invite = await supabase
+            .from("matchmaking_invitations")
+            .insert([
+                {
+                    inviter_user_id: userId,
+                    invitee_user_id: opponent_user_id,
+                    status: "pending"
+                }
+            ])
+            .select("id, inviter_user_id, invitee_user_id, status, created_at")
+            .single();
+
+        if (invite.error) return res.status(500).json({ error: invite.error.message });
+
+        return res.json({
+            invited: true,
+            invitation: invite.data
+        });
+    } catch (e) {
+        return res.status(500).json({ error: String(e) });
+    }
+});
+
+/** ロビー: 自分への招待通知一覧を取得 */
+app.get("/api/matchmaking/invitations/:handle", async (req, res) => {
+    try {
+        const handle = req.params.handle;
+        const userId = await getUserIdByHandle(handle);
+        if (!userId) return res.status(404).json({ error: "user not found" });
+
+        // pending 状態の招待を取得
+        const { data: invitations, error } = await supabase
+            .from("matchmaking_invitations")
+            .select("id, inviter_user_id, invitee_user_id, status, created_at")
+            .eq("invitee_user_id", userId)
+            .eq("status", "pending")
+            .order("created_at", { ascending: false });
+
+        if (error) return res.status(500).json({ error: error.message });
+
+        // 各招待者のユーザー情報を取得
+        const inviterIds = (invitations ?? []).map(inv => inv.inviter_user_id);
+        if (inviterIds.length === 0) {
+            return res.json({ data: [] });
+        }
+
+        const { data: users, error: usersError } = await supabase
+            .from("users")
+            .select("id, handle, display_name")
+            .in("id", inviterIds);
+
+        if (usersError) return res.status(500).json({ error: usersError.message });
+
+        // 招待情報とユーザー情報をマージ
+        const userMap = new Map((users ?? []).map(u => [u.id, u]));
+        const result = (invitations ?? []).map(inv => ({
+            invitation_id: inv.id,
+            inviter: userMap.get(inv.inviter_user_id) ?? null,
+            status: inv.status,
+            created_at: inv.created_at
+        }));
+
+        return res.json({ data: result });
+    } catch (e) {
+        return res.status(500).json({ error: String(e) });
+    }
+});
+
+/** ロビー: 招待を承認してマッチング */
+app.post("/api/matchmaking/accept-invite", async (req, res) => {
+    try {
+        const { handle, invitation_id } = req.body ?? {};
+        if (!handle || !invitation_id) {
+            return res.status(400).json({ error: "handle and invitation_id are required" });
+        }
+
+        const userId = await getUserIdByHandle(handle);
+        if (!userId) return res.status(404).json({ error: "user not found" });
+
+        // 招待を取得
+        const { data: invite, error: inviteError } = await supabase
+            .from("matchmaking_invitations")
+            .select("id, inviter_user_id, invitee_user_id, status")
+            .eq("id", invitation_id)
+            .eq("invitee_user_id", userId)
+            .eq("status", "pending")
+            .maybeSingle();
+
+        if (inviteError) return res.status(500).json({ error: inviteError.message });
+        if (!invite) return res.status(404).json({ error: "invitation not found or already processed" });
+
+        const inviterId = invite.inviter_user_id;
+
+        // 招待者と被招待者の両方がロビーに居るか確認
+        const inviterQueue = await getQueuedRowByUserId(inviterId);
+        if (inviterQueue.error) return res.status(500).json({ error: inviterQueue.error.message });
+        if (!inviterQueue.data) {
+            return res.status(400).json({ error: "inviter is no longer in the lobby" });
+        }
+
+        const inviteeQueue = await getQueuedRowByUserId(userId);
+        if (inviteeQueue.error) return res.status(500).json({ error: inviteeQueue.error.message });
+        if (!inviteeQueue.data) {
+            return res.status(400).json({ error: "you are no longer in the lobby" });
+        }
+
+        // マッチ作成
+        const match = await supabase
+            .from("matches")
+            .insert([
+                {
+                    p1_user_id: inviterId,
+                    p2_user_id: userId,
+                    status: "created"
+                }
+            ])
+            .select("id, p1_user_id, p2_user_id, status, created_at")
+            .single();
+
+        if (match.error) return res.status(500).json({ error: match.error.message });
+
+        // 両者をロビーから削除
+        const delInviter = await supabase
+            .from("matchmaking_queue")
+            .delete()
+            .eq("id", inviterQueue.data.id);
+
+        const delInvitee = await supabase
+            .from("matchmaking_queue")
+            .delete()
+            .eq("id", inviteeQueue.data.id);
+
+        if (delInviter.error) return res.status(500).json({ error: delInviter.error.message });
+        if (delInvitee.error) return res.status(500).json({ error: delInvitee.error.message });
+
+        // 招待ステータスを accepted に更新
+        const updateInvite = await supabase
+            .from("matchmaking_invitations")
+            .update({ status: "accepted" })
+            .eq("id", invitation_id);
+
+        if (updateInvite.error) return res.status(500).json({ error: updateInvite.error.message });
+
+        return res.json({
+            matched: true,
+            match: match.data
         });
     } catch (e) {
         return res.status(500).json({ error: String(e) });
@@ -730,6 +906,12 @@ app.post("/api/matches/:matchId/battle", async (req, res) => {
         const initialP1Team = team1.map(p => ({ key: p.key, cur_hp: p.hp, hp: p.hp, atk: p.atk, def: p.def, spd: p.spd }));
         const initialP2Team = team2.map(p => ({ key: p.key, cur_hp: p.hp, hp: p.hp, atk: p.atk, def: p.def, spd: p.spd }));
 
+        // ★ バトル開始時に SPD を比較して初手を決定
+        const p1Speed = initialP1Team[0]?.spd ?? 0;
+        const p2Speed = initialP2Team[0]?.spd ?? 0;
+        const initialRoundSpeedOrder = p1Speed >= p2Speed ? "p1_first" : "p2_first";
+        const initialCurrentTurnSide = initialRoundSpeedOrder === "p1_first" ? "p1" : "p2";
+
         const stateInsert = await supabase
             .from("battle_states")
             .insert([{
@@ -738,9 +920,9 @@ app.post("/api/matches/:matchId/battle", async (req, res) => {
                 p2_team_json: initialP2Team,
                 p1_active_index: 0,
                 p2_active_index: 0,
-                current_turn_side: "p1",
+                current_turn_side: initialCurrentTurnSide,
                 round_number: 1,
-                round_speed_order: null
+                round_speed_order: initialRoundSpeedOrder
             }])
             .select("id")
             .single();
