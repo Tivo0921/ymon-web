@@ -31,7 +31,7 @@ export default function HomePage() {
       padding: 24,
       width: '100%',
       margin: "0 auto",
-      backgroundImage: 'url(/wallpaper.png)',
+      backgroundImage: 'url(/home.png)',
       backgroundSize: 'cover',
       backgroundPosition: 'center',
       backgroundAttachment: 'fixed',

@@ -232,10 +232,18 @@ export default function MatchPage() {
         }
 
         return (
-            <main style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
-                <h1>Match</h1>
-                <p>matchId: <b>{matchId}</b></p>
-                <p>handle: <b>{handle || "(none)"}</b></p>
+            <main style={{
+                backgroundImage: 'url(/matches.png)',
+                backgroundSize: 'cover',
+                backgroundPosition: 'center',
+                backgroundAttachment: 'fixed',
+                minHeight: '100vh',
+                width: '100%'
+            }}>
+                <div style={{ maxWidth: 900, margin: "0 auto", padding: 24 }}>
+                    <h1>Match</h1>
+                    <p>matchId: <b>{matchId}</b></p>
+                    <p>handle: <b>{handle || "(none)"}</b></p>
 
                 {err && <div style={{ color: "crimson" }}>{err}</div>}
 
@@ -275,15 +283,24 @@ export default function MatchPage() {
                     </button>
                     <button onClick={load} style={{ padding: 10 }}>reload</button>
                 </div>
+                </div>
             </main>
         );
     }
 
     // バトル中：ターン制画面
     return (
-        <main style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
-            <h1>Battle in Progress</h1>
-            <p>battleId: <b>{battleId}</b></p>
+        <main style={{
+            backgroundImage: 'url(/matches.png)',
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            backgroundAttachment: 'fixed',
+            minHeight: '100vh',
+            width: '100%'
+        }}>
+            <div style={{ maxWidth: 900, margin: "0 auto", padding: 24 }}>
+                <h1>Battle in Progress</h1>
+                <p>battleId: <b>{battleId}</b></p>
             <p>Round: <b>{battleState?.roundNumber ?? 1}</b> | Current Turn Side: <b>{battleState?.currentTurnSide === "p1" ? "P1" : "P2"}</b></p>
             <p>Status: <b>{battleState?.status ?? "loading"}</b></p>
             <p style={{ fontSize: 12, color: "#666 " }}>【DEBUG】currentTurnSide: {battleState?.currentTurnSide}, P1: {matchData?.players?.p1?.handle}, P2: {matchData?.players?.p2?.handle}, handle: {handle}</p>
@@ -486,6 +503,7 @@ export default function MatchPage() {
             )}
 
             {!battleState && <p>バトル状態読み込み中...</p>}
+            </div>
         </main>
     );
 }
