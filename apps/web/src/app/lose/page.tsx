@@ -8,9 +8,21 @@ export default function LosePage() {
     const matchId = sp.get("matchId");
 
     return (
-        <div style={{ padding: "20px", textAlign: "center", minHeight: "100vh", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "center" }}>
-            <h1 style={{ fontSize: "48px", color: "#ff0000", marginBottom: "20px" }}>😢 敗北 😢</h1>
-            <p style={{ fontSize: "24px", marginBottom: "40px" }}>バトルに負けてしまいました...</p>
+        <div style={{
+            padding: "20px",
+            textAlign: "center",
+            minHeight: "100vh",
+            display: "flex",
+            flexDirection: "column",
+            justifyContent: "flex-start",
+            paddingTop: "300px",
+            alignItems: "center",
+            backgroundImage: 'url(/lose.png)',
+            backgroundSize: 'cover',
+            backgroundPosition: '0 0',
+            backgroundAttachment: 'fixed',
+            width: '100%'
+        }}>
 
             <button
                 onClick={() => router.push("/")}

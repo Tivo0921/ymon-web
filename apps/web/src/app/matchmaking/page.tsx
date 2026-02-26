@@ -193,11 +193,19 @@ export default function MatchmakingPage() {
     }
 
     return (
-        <main style={{ padding: 24, maxWidth: 720, margin: "0 auto" }}>
-            <h1>ロビー</h1>
-            <p>あなた: <b>{handle}</b> / モード: <b>{mode}</b></p>
+        <main style={{
+            backgroundImage: 'url(/matchmaking.png)',
+            backgroundSize: 'cover',
+            backgroundPosition: 'center',
+            backgroundAttachment: 'fixed',
+            minHeight: '100vh',
+            width: '100%'
+        }}>
+            <div style={{ maxWidth: 720, margin: "0 auto", padding: 24 }}>
+                <h1>ロビー</h1>
+                <p>あなた: <b>{handle}</b> / モード: <b>{mode}</b></p>
 
-            <div style={{ display: "flex", gap: 8, margin: "12px 0", flexWrap: "wrap" }}>
+                <div style={{ display: "flex", gap: 8, margin: "12px 0", flexWrap: "wrap" }}>
                 {!isQueued ? (
                     <button onClick={joinLobby} style={{ padding: 10, fontSize: 16 }}>
                         ロビーに参加
@@ -357,6 +365,7 @@ export default function MatchmakingPage() {
             <p style={{ opacity: 0.6, marginTop: 24 }}>
                 ロビーに参加してプレイヤーを選択して招待を送信します。相手が承認すると対戦が開始します。
             </p>
+            </div>
         </main>
     );
 }
