@@ -34,9 +34,10 @@ docker-compose up --build
 ```
 
 **Step 3:** アプリにアクセス
-- Web: http://localhost:3000
-- API: http://localhost:3001
-- Health Check: http://localhost:3001/health
+
+- Web: <http://localhost:3000>
+- API: <http://localhost:3001>
+- Health Check: <http://localhost:3001/health>
 
 詳細は [DOCKER_SETUP.md](DOCKER_SETUP.md) をご覧ください。
 
@@ -81,18 +82,21 @@ docker-compose up --build
 ## 🎯 各サービスの詳細
 
 ### API サービス (port 3001)
+
 - Base: Node 20-Alpine
 - 最適化: Multi-stage build
 - Health Check: `/health` エンドポイント
 - ホットリロード: ファイル変更で自動再起動
 
 ### Web サービス (port 3000)
+
 - Base: Node 20-Alpine
 - ビルド: Multi-stage build with Next.js optimization
 - Health Check: 30秒ごとに確認
 - ホットリロード: コード変更時にブラウザ自動更新
 
 ### PostgreSQL (port 5432) - オプション
+
 - Image: postgres:16-Alpine
 - 用途: ローカル開発用（使用しない場合はスキップ可能）
 - ボリューム: `postgres_data` で永続化
@@ -131,6 +135,7 @@ docker-compose up --build
    - `apps/api/.env` ファイルに SUPABASE_URL と SUPABASE_SERVICE_ROLE_KEY を設定する必要があります
 
 2. **Supabase テーブルは手動で作成してください**
+
    ```sql
    -- courses テーブル
    CREATE TABLE courses (
