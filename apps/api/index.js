@@ -87,6 +87,22 @@ app.post("/api/users", async (req, res) => {
             .single();
 
         if (created.error) return res.status(500).json({ error: created.error.message });
+
+        // デフォルト教授を付与（prof_0, prof_1, prof_2）
+        const defaultProfessors = ["prof_0", "prof_1", "prof_2"];
+        const professorRecords = defaultProfessors.map(key => ({
+            user_id: created.data.id,
+            professor_key: key
+        }));
+
+        const professorInsert = await supabase
+            .from("user_professors")
+            .insert(professorRecords);
+
+        if (professorInsert.error) {
+            return res.status(500).json({ error: `教授の追加に失敗: ${professorInsert.error.message}` });
+        }
+
         return res.status(201).json({ data: created.data, created: true });
     } catch (e) {
         return res.status(500).json({ error: String(e) });
