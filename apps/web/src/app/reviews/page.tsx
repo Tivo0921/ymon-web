@@ -169,7 +169,7 @@ export default function ReviewsPage() {
 
     return (
         <main style={{ padding: 24, maxWidth: 800, margin: "0 auto" }}>
-            <h1>📖 授業レビュー</h1>
+            <h1>授業レビュー</h1>
             <p>handle: <b>{handle}</b></p>
 
             <button
@@ -186,7 +186,7 @@ export default function ReviewsPage() {
                 {/* 授業一覧 */}
                 <div style={{ border: "1px solid #ccc", padding: 16, borderRadius: 8 }}>
                     <h2>授業一覧</h2>
-                    
+
                     {/* 検索窓 */}
                     <div style={{ marginBottom: 16 }}>
                         <input
