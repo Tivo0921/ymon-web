@@ -297,73 +297,73 @@ export default function MatchmakingPage() {
                 <div style={{ marginTop: 24 }}>
                     <h2 style={{ color: "white" }}>教室にいる国民 ({lobbyPlayers.length})</h2>
                     <div style={{ background: "rgba(255, 255, 255, 0.9)", padding: 16, borderRadius: 4, marginTop: 12 }}>
-                            {sentInvitedToUserId && (
-                                <div style={{ padding: 12, background: "#fff3cd", color: "#856404", borderRadius: 4, marginBottom: 12 }}>
-                                    <b>待機中...</b> 招待を送信しました。相手が承認するまでお待ちください。
-                                    <button onClick={cancelSentInvite} style={{ marginLeft: 12, padding: "4px 8px", fontSize: 12, cursor: "pointer" }}>
-                                        キャンセル
-                                    </button>
-                                </div>
-                            )}
-                            {lobbyPlayers.length === 0 ? (
-                                <p style={{ opacity: 0.6, color: "black" }}>国民がいません</p>
-                            ) : (
-                                <div style={{ display: "grid", gap: 8 }}>
-                            {lobbyPlayers.map((player) => (
-                                <div
-                                    key={player.user_id}
-                                    style={{
-                                        display: "flex",
-                                        justifyContent: "space-between",
-                                        alignItems: "center",
-                                        padding: 12,
-                                        border: "1px solid #ddd",
-                                        borderRadius: 8,
-                                        background: player.user?.handle === handle ? "#f0f0f0" : "#fff",
-                                        opacity: sentInvitedToUserId ? 0.6 : 1
-                                    }}
-                                >
-                                    <div>
-                                        <div style={{ fontSize: 16, fontWeight: "bold" }}>
-                                            {player.user?.display_name || player.user?.handle}
+                        {sentInvitedToUserId && (
+                            <div style={{ padding: 12, background: "#fff3cd", color: "#856404", borderRadius: 4, marginBottom: 12 }}>
+                                <b>待機中...</b> 招待を送信しました。相手が承認するまでお待ちください。
+                                <button onClick={cancelSentInvite} style={{ marginLeft: 12, padding: "4px 8px", fontSize: 12, cursor: "pointer" }}>
+                                    キャンセル
+                                </button>
+                            </div>
+                        )}
+                        {lobbyPlayers.length === 0 ? (
+                            <p style={{ opacity: 0.6, color: "black" }}>国民がいません</p>
+                        ) : (
+                            <div style={{ display: "grid", gap: 8 }}>
+                                {lobbyPlayers.map((player) => (
+                                    <div
+                                        key={player.user_id}
+                                        style={{
+                                            display: "flex",
+                                            justifyContent: "space-between",
+                                            alignItems: "center",
+                                            padding: 12,
+                                            border: "1px solid #ddd",
+                                            borderRadius: 8,
+                                            background: player.user?.handle === handle ? "#f0f0f0" : "#fff",
+                                            opacity: sentInvitedToUserId ? 0.6 : 1
+                                        }}
+                                    >
+                                        <div>
+                                            <div style={{ fontSize: 16, fontWeight: "bold" }}>
+                                                {player.user?.display_name || player.user?.handle}
+                                            </div>
+                                            <div style={{ fontSize: 12, opacity: 0.6 }}>
+                                                @{player.user?.handle}
+                                            </div>
                                         </div>
-                                        <div style={{ fontSize: 12, opacity: 0.6 }}>
-                                            @{player.user?.handle}
-                                        </div>
+                                        {player.user?.handle !== handle && (
+                                            <button
+                                                onClick={() => invitePlayer(player.user_id)}
+                                                disabled={!isQueued || !!sentInvitedToUserId}
+                                                style={{
+                                                    padding: "8px 16px",
+                                                    fontSize: 12,
+                                                    background:
+                                                        sentInvitedToUserId ? "#ccc" :
+                                                            isQueued ? "#007bff" : "#ccc",
+                                                    color: (!isQueued || sentInvitedToUserId) ? "#666" : "white",
+                                                    border: "none",
+                                                    borderRadius: 4,
+                                                    cursor: (!isQueued || sentInvitedToUserId) ? "not-allowed" : "pointer",
+                                                    opacity: (!isQueued || sentInvitedToUserId) ? 0.6 : 1
+                                                }}
+                                            >
+                                                {sentInvitedToUserId ? "待機中..." :
+                                                    isQueued ? "招待" : "ロビー参加後に選択"}
+                                            </button>
+                                        )}
+                                        {player.user?.handle === handle && (
+                                            <div style={{ fontSize: 12, color: "green", fontWeight: "bold" }}>
+                                                あなた
+                                            </div>
+                                        )}
                                     </div>
-                                    {player.user?.handle !== handle && (
-                                        <button
-                                            onClick={() => invitePlayer(player.user_id)}
-                                            disabled={!isQueued || !!sentInvitedToUserId}
-                                            style={{
-                                                padding: "8px 16px",
-                                                fontSize: 12,
-                                                background:
-                                                    sentInvitedToUserId ? "#ccc" :
-                                                        isQueued ? "#007bff" : "#ccc",
-                                                color: (!isQueued || sentInvitedToUserId) ? "#666" : "white",
-                                                border: "none",
-                                                borderRadius: 4,
-                                                cursor: (!isQueued || sentInvitedToUserId) ? "not-allowed" : "pointer",
-                                                opacity: (!isQueued || sentInvitedToUserId) ? 0.6 : 1
-                                            }}
-                                        >
-                                            {sentInvitedToUserId ? "待機中..." :
-                                                isQueued ? "招待" : "ロビー参加後に選択"}
-                                        </button>
-                                    )}
-                                    {player.user?.handle === handle && (
-                                        <div style={{ fontSize: 12, color: "green", fontWeight: "bold" }}>
-                                            あなた
-                                        </div>
-                                    )}
-                                </div>
-                            ))}
-                                </div>
-                            )}
-                            <p style={{ opacity: 0.6, marginTop: 12, color: "black" }}>
-                                教室に入って国民を選択し、招待を送信します。相手が承認すると対戦が開始します。
-                            </p>
+                                ))}
+                            </div>
+                        )}
+                        <p style={{ opacity: 0.6, marginTop: 12, color: "black" }}>
+                            教室に入って国民を選択し、招待を送信します。相手が承認すると対戦が開始します。
+                        </p>
                     </div>
                 </div>
             </div>

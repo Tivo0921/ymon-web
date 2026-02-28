@@ -54,12 +54,15 @@ async function getOldestQueuedRowByMode(mode) {
 app.get("/health", (_req, res) => res.json({ ok: true }));
 
 /** master: professors */
-app.get("/api/professors", (_req, res) => {
+app.get("/api/professors", async (_req, res) => {
     try {
-        const p = path.join(__dirname, "master", "professors.json");
-        const raw = fs.readFileSync(p, "utf-8");
-        const data = JSON.parse(raw);
-        res.json({ data });
+        const { data, error } = await supabase
+            .from("professors")
+            .select("*")
+            .order("created_at", { ascending: true });
+
+        if (error) return res.status(500).json({ error: error.message });
+        res.json({ data: data ?? [] });
     } catch (e) {
         res.status(500).json({ error: String(e) });
     }
@@ -234,8 +237,8 @@ app.get("/api/users/:handle/owned-professors", async (req, res) => {
 
         if (error) return res.status(500).json({ error: error.message });
 
-        // master join (from professors.json)
-        const masters = loadProfessors();
+        // master join (from Supabase)
+        const masters = await loadProfessors();
         const masterMap = new Map(masters.map((p) => [p.key, p]));
 
         const merged = (owned ?? []).map((o) => ({
@@ -764,14 +767,101 @@ app.post("/api/reviews", async (req, res) => {
     }
 });
 
+// ===== Circle Reviews (サークルレビュー) =====
+
+/** マスターデータ（circles）をDBにセットアップ */
+
+/** サークル一覧取得（DB から） */
+app.get("/api/circles", async (_req, res) => {
+    try {
+        const { data, error } = await supabase
+            .from("circles")
+            .select("id, key, display_name, category, created_at")
+            .order("created_at", { ascending: true });
+
+        if (error) {
+            return res.status(500).json({ error: error.message });
+        }
+
+        res.json({ data: data ?? [] });
+    } catch (e) {
+        res.status(500).json({ error: String(e) });
+    }
+});
+
+/** サークル別レビュー取得 */
+app.get("/api/circle-reviews/:circleKey", async (req, res) => {
+    try {
+        const circleKey = decodeURIComponent(req.params.circleKey);
+
+        const reviews = await supabase
+            .from("circle_reviews")
+            .select("id, circle_key, author_handle, rating, comment, created_at")
+            .eq("circle_key", circleKey)
+            .order("created_at", { ascending: false });
+
+        if (reviews.error) {
+            return res.status(500).json({ error: reviews.error.message });
+        }
+
+        res.json({ data: reviews.data ?? [] });
+    } catch (e) {
+        res.status(500).json({ error: String(e) });
+    }
+});
+
+/** サークルレビュー投稿 */
+app.post("/api/circle-reviews", async (req, res) => {
+    try {
+        const { handle, circle_key, rating, comment } = req.body ?? {};
+
+        console.log("POST /api/circle-reviews received:", { handle, circle_key, rating, comment });
+
+        if (!handle || !circle_key || !rating || !comment) {
+            console.log("Missing required fields:", { handle, circle_key, rating, comment });
+            return res.status(400).json({ error: "handle, circle_key, rating, comment are required" });
+        }
+
+        const review = await supabase
+            .from("circle_reviews")
+            .insert([{
+                circle_key,
+                author_handle: handle,
+                rating: Math.max(1, Math.min(5, rating)),
+                comment
+            }])
+            .select("id, circle_key, author_handle, rating, comment, created_at")
+            .single();
+
+        if (review.error) {
+            console.error("Supabase error:", review.error);
+            return res.status(500).json({ error: review.error.message });
+        }
+
+        console.log("Review inserted successfully:", review.data);
+        res.status(201).json({ data: review.data });
+    } catch (e) {
+        console.error("Exception in POST /api/circle-reviews:", e);
+        res.status(500).json({ error: String(e) });
+    }
+});
+
+// ===== Initialization =====
+
 const port = process.env.PORT || 3001;
-app.listen(port, () => console.log(`API running on http://localhost:${port}`));
+app.listen(port, () => {
+    console.log(`API running on http://localhost:${port}`);
+});
 // ===== Battle (MVP) =====
 
-function loadProfessors() {
-    const p = path.join(__dirname, "master", "professors.json");
-    const raw = fs.readFileSync(p, "utf-8");
-    return JSON.parse(raw);
+async function loadProfessors() {
+    const { data, error } = await supabase
+        .from("professors")
+        .select("*")
+        .order("created_at", { ascending: true });
+    
+    if (error) throw new Error(error.message);
+    return data ?? [];
 }
 
 function getProfessorByKey(all, key) {
@@ -882,7 +972,7 @@ app.post("/api/matches/:matchId/battle", async (req, res) => {
         }
 
         // マスタからチーム構築
-        const masters = loadProfessors();
+        const masters = await loadProfessors();
         const team1 = p1_team_keys.map((k) => getProfessorByKey(masters, k));
         const team2 = p2_team_keys.map((k) => getProfessorByKey(masters, k));
 
@@ -1387,5 +1477,33 @@ app.get("/api/debug/match/:matchId", async (req, res) => {
         });
     } catch (e) {
         return res.status(500).json({ error: String(e) });
+    }
+});
+
+/** Table structure inspection */
+app.get("/api/debug/table-schema/:tableName", async (req, res) => {
+    try {
+        const tableName = req.params.tableName;
+
+        const { data, error } = await supabase.rpc("execute_sql", {
+            sql: `
+            SELECT 
+                column_name, 
+                data_type, 
+                is_nullable, 
+                column_default
+            FROM information_schema.columns
+            WHERE table_name = '${tableName}'
+            ORDER BY ordinal_position
+            `
+        }).catch(() => {
+            // Fallback: Use simple select with limit 0 to get column info
+            return supabase.from(tableName).select("*").limit(0);
+        });
+
+        if (error) return res.status(500).json({ error: error.message });
+        res.json({ tableName, columns: data });
+    } catch (e) {
+        res.status(500).json({ error: String(e) });
     }
 });
