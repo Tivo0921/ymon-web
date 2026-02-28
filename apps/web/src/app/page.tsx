@@ -42,7 +42,7 @@ export default function HomePage() {
       alignItems: 'center'
     }}>
       <div style={{
-        background: 'rgba(255, 255, 255, 0.15)',
+        background: 'rgba(255, 255, 255, 0.08)',
         backdropFilter: 'blur(10px)',
         borderRadius: '12px',
         padding: '40px',
