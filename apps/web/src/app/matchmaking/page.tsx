@@ -69,7 +69,7 @@ export default function MatchmakingPage() {
 
         // ロビーに入っているか確認
         if (!isQueued) {
-            setErr("ロビーに参加してから招待してください");
+            setErr("教室に参加してから招待してください");
             return;
         }
 
@@ -202,169 +202,170 @@ export default function MatchmakingPage() {
             width: '100%'
         }}>
             <div style={{ maxWidth: 720, margin: "0 auto", padding: 24 }}>
-                <h1>ロビー</h1>
-                <p>あなた: <b>{handle}</b> / モード: <b>{mode}</b></p>
+                <h1 style={{ color: "white" }}>講義棟</h1>
+                <p style={{ background: "rgba(255, 255, 255, 0.9)", padding: 12, borderRadius: 4, color: "black", marginBottom: 16 }}>あなた: <b>{handle}</b> / モード: <b>{mode}</b></p>
 
                 <div style={{ display: "flex", gap: 8, margin: "12px 0", flexWrap: "wrap" }}>
-                {!isQueued ? (
-                    <button onClick={joinLobby} style={{ padding: 10, fontSize: 16 }}>
-                        ロビーに参加
+                    {!isQueued ? (
+                        <button onClick={joinLobby} style={{ padding: 10, fontSize: 16 }}>
+                            教室に入る
+                        </button>
+                    ) : (
+                        <button onClick={leaveLobby} style={{ padding: 10, fontSize: 16, background: "crimson", color: "white" }}>
+                            教室から離脱
+                        </button>
+                    )}
+                    <button onClick={refreshLobby} style={{ padding: 10, fontSize: 16 }}>
+                        更新
                     </button>
-                ) : (
-                    <button onClick={leaveLobby} style={{ padding: 10, fontSize: 16, background: "crimson", color: "white" }}>
-                        ロビーから離脱
+                    <button onClick={() => router.push(`/reviews?handle=${encodeURIComponent(handle)}`)} style={{ padding: 10 }}>
+                        授業レビューを見る
                     </button>
-                )}
-                <button onClick={refreshLobby} style={{ padding: 10, fontSize: 16 }}>
-                    更新
-                </button>
-                <button onClick={() => router.push(`/reviews?handle=${encodeURIComponent(handle)}`)} style={{ padding: 10 }}>
-                    📖 レビューページ
-                </button>
-            </div>
+                </div>
 
-            {err && <div style={{ color: "crimson", marginBottom: 12 }}>{err}</div>}
+                {err && <div style={{ color: "crimson", marginBottom: 12 }}>{err}</div>}
 
-            {loading && <p>読み込み中...</p>}
 
-            {/* === 招待確認ウィンドウ === */}
-            {invitation && (
-                <div
-                    style={{
-                        position: "fixed",
-                        top: 0,
-                        left: 0,
-                        right: 0,
-                        bottom: 0,
-                        background: "rgba(0,0,0,0.5)",
-                        display: "flex",
-                        justifyContent: "center",
-                        alignItems: "center",
-                        zIndex: 1000
-                    }}
-                >
+
+                {/* === 招待確認ウィンドウ === */}
+                {invitation && (
                     <div
                         style={{
-                            background: "white",
-                            padding: 24,
-                            borderRadius: 8,
-                            maxWidth: 400,
-                            textAlign: "center",
-                            boxShadow: "0 4px 12px rgba(0,0,0,0.15)"
+                            position: "fixed",
+                            top: 0,
+                            left: 0,
+                            right: 0,
+                            bottom: 0,
+                            background: "rgba(0,0,0,0.5)",
+                            display: "flex",
+                            justifyContent: "center",
+                            alignItems: "center",
+                            zIndex: 1000
                         }}
                     >
-                        <h2 style={{ margin: "0 0 16px 0" }}>招待</h2>
-                        <p style={{ fontSize: 16, margin: "8px 0" }}>
-                            <b>{invitation.inviter?.display_name}</b> さんと対戦しますか？
-                        </p>
-                        <p style={{ fontSize: 12, opacity: 0.6, margin: "12px 0" }}>
-                            @{invitation.inviter?.handle}
-                        </p>
-                        <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 20 }}>
-                            <button
-                                onClick={() => acceptInvite(invitation.invitation_id)}
-                                style={{
-                                    padding: "10px 24px",
-                                    fontSize: 14,
-                                    background: "#28a745",
-                                    color: "white",
-                                    border: "none",
-                                    borderRadius: 4,
-                                    cursor: "pointer"
-                                }}
-                            >
-                                はい
-                            </button>
-                            <button
-                                onClick={rejectInvite}
-                                style={{
-                                    padding: "10px 24px",
-                                    fontSize: 14,
-                                    background: "#6c757d",
-                                    color: "white",
-                                    border: "none",
-                                    borderRadius: 4,
-                                    cursor: "pointer"
-                                }}
-                            >
-                                いいえ
-                            </button>
+                        <div
+                            style={{
+                                background: "white",
+                                padding: 24,
+                                borderRadius: 8,
+                                maxWidth: 400,
+                                textAlign: "center",
+                                boxShadow: "0 4px 12px rgba(0,0,0,0.15)"
+                            }}
+                        >
+                            <h2 style={{ margin: "0 0 16px 0" }}>招待</h2>
+                            <p style={{ fontSize: 16, margin: "8px 0" }}>
+                                <b>{invitation.inviter?.display_name}</b> さんと対戦しますか？
+                            </p>
+                            <p style={{ fontSize: 12, opacity: 0.6, margin: "12px 0" }}>
+                                @{invitation.inviter?.handle}
+                            </p>
+                            <div style={{ display: "flex", gap: 8, justifyContent: "center", marginTop: 20 }}>
+                                <button
+                                    onClick={() => acceptInvite(invitation.invitation_id)}
+                                    style={{
+                                        padding: "10px 24px",
+                                        fontSize: 14,
+                                        background: "#28a745",
+                                        color: "white",
+                                        border: "none",
+                                        borderRadius: 4,
+                                        cursor: "pointer"
+                                    }}
+                                >
+                                    はい
+                                </button>
+                                <button
+                                    onClick={rejectInvite}
+                                    style={{
+                                        padding: "10px 24px",
+                                        fontSize: 14,
+                                        background: "#6c757d",
+                                        color: "white",
+                                        border: "none",
+                                        borderRadius: 4,
+                                        cursor: "pointer"
+                                    }}
+                                >
+                                    いいえ
+                                </button>
+                            </div>
                         </div>
                     </div>
-                </div>
-            )}
-
-            <div style={{ marginTop: 24 }}>
-                <h2>ロビーにいるプレイヤー ({lobbyPlayers.length})</h2>
-                {sentInvitedToUserId && (
-                    <div style={{ padding: 12, background: "#fff3cd", color: "#856404", borderRadius: 4, marginBottom: 12 }}>
-                        <b>待機中...</b> 招待を送信しました。相手が承認するまでお待ちください。
-                        <button onClick={cancelSentInvite} style={{ marginLeft: 12, padding: "4px 8px", fontSize: 12, cursor: "pointer" }}>
-                            キャンセル
-                        </button>
-                    </div>
                 )}
-                {lobbyPlayers.length === 0 ? (
-                    <p style={{ opacity: 0.6 }}>プレイヤーがいません</p>
-                ) : (
-                    <div style={{ display: "grid", gap: 8 }}>
-                        {lobbyPlayers.map((player) => (
-                            <div
-                                key={player.user_id}
-                                style={{
-                                    display: "flex",
-                                    justifyContent: "space-between",
-                                    alignItems: "center",
-                                    padding: 12,
-                                    border: "1px solid #ddd",
-                                    borderRadius: 8,
-                                    background: player.user?.handle === handle ? "#f0f0f0" : "#fff",
-                                    opacity: sentInvitedToUserId ? 0.6 : 1
-                                }}
-                            >
-                                <div>
-                                    <div style={{ fontSize: 16, fontWeight: "bold" }}>
-                                        {player.user?.display_name || player.user?.handle}
-                                    </div>
-                                    <div style={{ fontSize: 12, opacity: 0.6 }}>
-                                        @{player.user?.handle}
-                                    </div>
-                                </div>
-                                {player.user?.handle !== handle && (
-                                    <button
-                                        onClick={() => invitePlayer(player.user_id)}
-                                        disabled={!isQueued || !!sentInvitedToUserId}
-                                        style={{
-                                            padding: "8px 16px",
-                                            fontSize: 12,
-                                            background:
-                                                sentInvitedToUserId ? "#ccc" :
-                                                    isQueued ? "#007bff" : "#ccc",
-                                            color: (!isQueued || sentInvitedToUserId) ? "#666" : "white",
-                                            border: "none",
-                                            borderRadius: 4,
-                                            cursor: (!isQueued || sentInvitedToUserId) ? "not-allowed" : "pointer",
-                                            opacity: (!isQueued || sentInvitedToUserId) ? 0.6 : 1
-                                        }}
-                                    >
-                                        {sentInvitedToUserId ? "待機中..." :
-                                            isQueued ? "招待" : "ロビー参加後に選択"}
+
+                <div style={{ marginTop: 24 }}>
+                    <h2 style={{ color: "white" }}>教室にいる国民 ({lobbyPlayers.length})</h2>
+                    <div style={{ background: "rgba(255, 255, 255, 0.9)", padding: 16, borderRadius: 4, marginTop: 12 }}>
+                            {sentInvitedToUserId && (
+                                <div style={{ padding: 12, background: "#fff3cd", color: "#856404", borderRadius: 4, marginBottom: 12 }}>
+                                    <b>待機中...</b> 招待を送信しました。相手が承認するまでお待ちください。
+                                    <button onClick={cancelSentInvite} style={{ marginLeft: 12, padding: "4px 8px", fontSize: 12, cursor: "pointer" }}>
+                                        キャンセル
                                     </button>
-                                )}
-                                {player.user?.handle === handle && (
-                                    <div style={{ fontSize: 12, color: "green", fontWeight: "bold" }}>
-                                        あなた
+                                </div>
+                            )}
+                            {lobbyPlayers.length === 0 ? (
+                                <p style={{ opacity: 0.6, color: "black" }}>国民がいません</p>
+                            ) : (
+                                <div style={{ display: "grid", gap: 8 }}>
+                            {lobbyPlayers.map((player) => (
+                                <div
+                                    key={player.user_id}
+                                    style={{
+                                        display: "flex",
+                                        justifyContent: "space-between",
+                                        alignItems: "center",
+                                        padding: 12,
+                                        border: "1px solid #ddd",
+                                        borderRadius: 8,
+                                        background: player.user?.handle === handle ? "#f0f0f0" : "#fff",
+                                        opacity: sentInvitedToUserId ? 0.6 : 1
+                                    }}
+                                >
+                                    <div>
+                                        <div style={{ fontSize: 16, fontWeight: "bold" }}>
+                                            {player.user?.display_name || player.user?.handle}
+                                        </div>
+                                        <div style={{ fontSize: 12, opacity: 0.6 }}>
+                                            @{player.user?.handle}
+                                        </div>
                                     </div>
-                                )}
-                            </div>
-                        ))}
+                                    {player.user?.handle !== handle && (
+                                        <button
+                                            onClick={() => invitePlayer(player.user_id)}
+                                            disabled={!isQueued || !!sentInvitedToUserId}
+                                            style={{
+                                                padding: "8px 16px",
+                                                fontSize: 12,
+                                                background:
+                                                    sentInvitedToUserId ? "#ccc" :
+                                                        isQueued ? "#007bff" : "#ccc",
+                                                color: (!isQueued || sentInvitedToUserId) ? "#666" : "white",
+                                                border: "none",
+                                                borderRadius: 4,
+                                                cursor: (!isQueued || sentInvitedToUserId) ? "not-allowed" : "pointer",
+                                                opacity: (!isQueued || sentInvitedToUserId) ? 0.6 : 1
+                                            }}
+                                        >
+                                            {sentInvitedToUserId ? "待機中..." :
+                                                isQueued ? "招待" : "ロビー参加後に選択"}
+                                        </button>
+                                    )}
+                                    {player.user?.handle === handle && (
+                                        <div style={{ fontSize: 12, color: "green", fontWeight: "bold" }}>
+                                            あなた
+                                        </div>
+                                    )}
+                                </div>
+                            ))}
+                                </div>
+                            )}
+                            <p style={{ opacity: 0.6, marginTop: 12, color: "black" }}>
+                                教室に入って国民を選択し、招待を送信します。相手が承認すると対戦が開始します。
+                            </p>
                     </div>
-                )}
-            </div>
-
-            <p style={{ opacity: 0.6, marginTop: 24 }}>
-                ロビーに参加してプレイヤーを選択して招待を送信します。相手が承認すると対戦が開始します。
-            </p>
+                </div>
             </div>
         </main>
     );
