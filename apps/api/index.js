@@ -1485,7 +1485,7 @@ app.get("/api/debug/table-schema/:tableName", async (req, res) => {
     try {
         const tableName = req.params.tableName;
 
-        const { data, error } = await supabase.rpc("execute_sql", {
+        let rpcResult = await supabase.rpc("execute_sql", {
             sql: `
             SELECT 
                 column_name, 
@@ -1496,11 +1496,14 @@ app.get("/api/debug/table-schema/:tableName", async (req, res) => {
             WHERE table_name = '${tableName}'
             ORDER BY ordinal_position
             `
-        }).catch(() => {
-            // Fallback: Use simple select with limit 0 to get column info
-            return supabase.from(tableName).select("*").limit(0);
         });
 
+        if (rpcResult.error) {
+            // Fallback: Use simple select with limit 0 to get column info
+            rpcResult = await supabase.from(tableName).select("*").limit(0);
+        }
+
+        const { data, error } = rpcResult;
         if (error) return res.status(500).json({ error: error.message });
         res.json({ tableName, columns: data });
     } catch (e) {
