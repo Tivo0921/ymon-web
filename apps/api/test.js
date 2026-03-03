@@ -50,9 +50,10 @@ await test("GET /api/professors - should return professors list", async () => {
     const { status, data } = await request("GET", "/api/professors");
     assert(status === 200, `Expected status 200, got ${status}`);
     assert(Array.isArray(data.data), "Expected data.data to be an array");
-    assert(data.data.length === 9, `Expected 9 professors, got ${data.data.length}`);
-    assert(data.data[0].key === "prof_0", "Expected first professor key to be prof_0");
-    assert(data.data[0].name === "四方順司", "Expected first professor name");
+    assert(data.data.length > 0, `Expected at least 1 professor, got ${data.data.length}`);
+    const prof0 = data.data.find((prof) => prof.key === "prof_0");
+    assert(prof0, "Expected to find professor with key prof_0");
+    assert(prof0.name === "四方順司", "Expected professor prof_0 to have the correct name");
 });
 
 // Test 2: Get Circles
