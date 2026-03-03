@@ -1480,26 +1480,36 @@ app.get("/api/debug/match/:matchId", async (req, res) => {
     }
 });
 
-/** Table structure inspection */
-app.get("/api/debug/table-schema/:tableName", async (req, res) => {
-    try {
-        const tableName = req.params.tableName;
+/** Table structure inspection (development only) */
+const ALLOWED_TABLE_NAMES = new Set([
+    "battle_states",
+    "battle_turns",
+    "battles",
+    "circle_reviews",
+    "circles",
+    "courses",
+    "matches",
+    "matchmaking_invitations",
+    "matchmaking_queue",
+    "professors",
+    "reviews",
+    "user_professors",
+    "users",
+]);
 
-        const { data, error } = await supabase.rpc("execute_sql", {
-            sql: `
-            SELECT 
-                column_name, 
-                data_type, 
-                is_nullable, 
-                column_default
-            FROM information_schema.columns
-            WHERE table_name = '${tableName}'
-            ORDER BY ordinal_position
-            `
-        }).catch(() => {
-            // Fallback: Use simple select with limit 0 to get column info
-            return supabase.from(tableName).select("*").limit(0);
-        });
+app.get("/api/debug/table-schema/:tableName", async (req, res) => {
+    if (process.env.NODE_ENV !== "development") {
+        return res.status(404).json({ error: "Not found" });
+    }
+
+    const tableName = req.params.tableName;
+
+    if (!ALLOWED_TABLE_NAMES.has(tableName)) {
+        return res.status(400).json({ error: "Unknown table name" });
+    }
+
+    try {
+        const { data, error } = await supabase.from(tableName).select("*").limit(0);
 
         if (error) return res.status(500).json({ error: error.message });
         res.json({ tableName, columns: data });
