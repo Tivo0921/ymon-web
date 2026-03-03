@@ -822,12 +822,19 @@ app.post("/api/circle-reviews", async (req, res) => {
             return res.status(400).json({ error: "handle, circle_key, rating, comment are required" });
         }
 
+        const parsedRating = Number.parseInt(rating, 10);
+        if (Number.isNaN(parsedRating) || !Number.isInteger(parsedRating)) {
+            console.log("Invalid rating value:", { rating });
+            return res.status(400).json({ error: "rating must be an integer between 1 and 5" });
+        }
+        const clampedRating = Math.max(1, Math.min(5, parsedRating));
+
         const review = await supabase
             .from("circle_reviews")
             .insert([{
                 circle_key,
                 author_handle: handle,
-                rating: Math.max(1, Math.min(5, rating)),
+                rating: clampedRating,
                 comment
             }])
             .select("id, circle_key, author_handle, rating, comment, created_at")
