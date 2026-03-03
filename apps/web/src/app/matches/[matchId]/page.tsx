@@ -243,8 +243,8 @@ export default function MatchPage() {
                 <div style={{ maxWidth: 900, margin: "0 auto", padding: 24 }}>
                     <h1 style={{ color: "white" }}>野外音楽堂</h1>
                     <div style={{ background: "rgba(255, 255, 255, 0.8)", padding: 12, marginBottom: 16, borderRadius: 4 }}>
-                      <p style={{ color: "black", margin: 4 }}>matchId: <b>{matchId}</b></p>
-                      <p style={{ color: "black", margin: 4 }}>handle: <b>{handle || "(none)"}</b></p>
+                        <p style={{ color: "black", margin: 4 }}>matchId: <b>{matchId}</b></p>
+                        <p style={{ color: "black", margin: 4 }}>handle: <b>{handle || "(none)"}</b></p>
                     </div>
 
                     {err && <div style={{ color: "crimson" }}>{err}</div>}
@@ -303,9 +303,9 @@ export default function MatchPage() {
             <div style={{ maxWidth: 900, margin: "0 auto", padding: 24 }}>
                 <h1 style={{ color: "white" }}>野外音楽堂にて交戦中</h1>
                 <div style={{ background: "rgba(255, 255, 255, 0.8)", padding: 12, marginBottom: 16, borderRadius: 4 }}>
-                  <p style={{ color: "black", margin: 4 }}>battleId: <b>{battleId}</b></p>
-                  <p style={{ color: "black", margin: 4 }}>Round: <b>{battleState?.roundNumber ?? 1}</b> | Current Turn Side: <b>{battleState?.currentTurnSide === "p1" ? "P1" : "P2"}</b></p>
-                  <p style={{ color: "black", margin: 4 }}>Status: <b>{battleState?.status ?? "loading"}</b></p>
+                    <p style={{ color: "black", margin: 4 }}>battleId: <b>{battleId}</b></p>
+                    <p style={{ color: "black", margin: 4 }}>Round: <b>{battleState?.roundNumber ?? 1}</b> | Current Turn Side: <b>{battleState?.currentTurnSide === "p1" ? "P1" : "P2"}</b></p>
+                    <p style={{ color: "black", margin: 4 }}>Status: <b>{battleState?.status ?? "loading"}</b></p>
                 </div>
                 <p style={{ fontSize: 12, color: "#666 " }}>【DEBUG】currentTurnSide: {battleState?.currentTurnSide}, P1: {matchData?.players?.p1?.handle}, P2: {matchData?.players?.p2?.handle}, handle: {handle}</p>
 
