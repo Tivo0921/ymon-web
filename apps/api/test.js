@@ -57,14 +57,12 @@ await test("GET /api/professors - should return professors list", async () => {
 });
 
 // Test 2: Get Circles
-let initialCircleCount = 0;
 let firstCircleKey = "";
 await test("GET /api/circles - should return circles list", async () => {
     const { status, data } = await request("GET", "/api/circles");
     assert(status === 200, `Expected status 200, got ${status}`);
     assert(Array.isArray(data.data), "Expected data.data to be an array");
     assert(data.data.length > 0, "Expected at least 1 circle");
-    initialCircleCount = data.data.length;
     firstCircleKey = data.data[0].key;
     assert(firstCircleKey && firstCircleKey.length > 0, "Expected first circle to have a key");
     assert(data.data[0].display_name && data.data[0].display_name.length > 0, "Expected first circle to have display_name");
