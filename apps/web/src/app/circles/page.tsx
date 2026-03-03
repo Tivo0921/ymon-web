@@ -203,7 +203,13 @@ export default function CirclesPage() {
                             filteredCircles.map((circle) => (
                                 <button
                                     key={circle.key}
-                                    onClick={() => setSelectedCircle(circle)}
+                                    onClick={() => {
+                                        setSelectedCircle(circle);
+                                        setErr(null);
+                                        setSuccessMsg(null);
+                                        setDraftRating(0);
+                                        setDraftComment("");
+                                    }}
                                     style={{
                                         padding: 12,
                                         textAlign: "left",
