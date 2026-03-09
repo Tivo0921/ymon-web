@@ -221,6 +221,9 @@ export default function MatchmakingPage() {
                     <button onClick={() => router.push(`/reviews?handle=${encodeURIComponent(handle)}`)} style={{ padding: 10 }}>
                         授業レビューを見る
                     </button>
+                    <button onClick={() => router.push(`/circles?handle=${encodeURIComponent(handle)}`)} style={{ padding: 10 }}>
+                        サークルレビューを見る
+                    </button>
                 </div>
 
                 {err && <div style={{ color: "crimson", marginBottom: 12 }}>{err}</div>}

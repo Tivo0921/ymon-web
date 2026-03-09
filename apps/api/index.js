@@ -789,6 +789,46 @@ app.get("/api/circles", async (_req, res) => {
     }
 });
 
+/** サークル作成 */
+app.post("/api/circles", async (req, res) => {
+    try {
+        const { key, display_name, category } = req.body ?? {};
+        
+        if (!key || !display_name || !category) {
+            return res.status(400).json({ error: "key, display_name, category are required" });
+        }
+
+        // キーの一意性を確認
+        const existing = await supabase
+            .from("circles")
+            .select("id")
+            .eq("key", key)
+            .maybeSingle();
+
+        if (existing.error) {
+            return res.status(500).json({ error: existing.error.message });
+        }
+
+        if (existing.data) {
+            return res.status(400).json({ error: "Circle key already exists" });
+        }
+
+        const { data, error } = await supabase
+            .from("circles")
+            .insert([{ key, display_name, category }])
+            .select("id, key, display_name, category, created_at")
+            .single();
+
+        if (error) {
+            return res.status(500).json({ error: error.message });
+        }
+
+        res.status(201).json({ data });
+    } catch (e) {
+        res.status(500).json({ error: String(e) });
+    }
+});
+
 /** サークル別レビュー取得 */
 app.get("/api/circle-reviews/:circleKey", async (req, res) => {
     try {
@@ -1516,7 +1556,7 @@ app.get("/api/debug/table-schema/:tableName", async (req, res) => {
     }
 
     try {
-        const { data, error } = await supabase.rpc("execute_sql", {
+        let rpcResult = await supabase.rpc("execute_sql", {
             sql: `
             SELECT
                 column_name,
