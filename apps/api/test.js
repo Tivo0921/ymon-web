@@ -148,6 +148,61 @@ await test("GET /health - should return health status", async () => {
     assert(data.ok === true, "Expected ok to be true");
 });
 
+// ===== Auth Tests (Supabase Auth) =====
+console.log(`\n${colors.yellow}🔐 Auth Tests${colors.reset}`);
+
+const signupTestEmail = `ikeda-shun-dh@ynu.jp`;  // Test email for signup (can receive emails)
+const signupTestPassword = `estPassword123!`;
+const signupTestHandle = `shun`;
+
+const loginTestEmail = `example@ynu.jp`;  // Test account for login (DB only, test account)
+const loginTestHandle = `example`;
+
+// Test 11: Debug - List first 5 users in DB
+await test("DEBUG: List first 5 users in DB", async () => {
+    const { status, data } = await request("GET", "/api/users?limit=5");
+    console.log(`   Found ${data.data?.length || 0} users`);
+    if (data.data) {
+        data.data.slice(0, 3).forEach(u => {
+            console.log(`     - ${u.handle} (${u.email || 'no email'})`);
+        });
+    }
+    assert(status === 200, `Expected status 200, got ${status}`);
+});
+
+// Test 12: Debug - Check if test account exists
+await test("DEBUG: Check if test account exists", async () => {
+    const { status, data } = await request("GET", `/api/users/${loginTestHandle}`);
+    console.log(`   Status: ${status}`, data);
+    if (status === 200) {
+        console.log(`   ✓ Test account found: handle=${data.data.handle}, email=${data.data.email}`);
+    } else {
+        console.log(`   ✗ Test account not found - need to run migration 007`);
+    }
+});
+
+// Test 13: Validate @ynu.jp rejection
+await test("POST /api/auth/signup - reject non-@ynu.jp email", async () => {
+    const { status, data } = await request("POST", "/api/auth/signup", {
+        email: `test@gmail.com`,
+        password: "TestPassword123!",
+    });
+    console.log(`   Response:`, data);
+    assert(status >= 400, `Expected error status, got ${status}`);
+});
+
+// Test 14: Login with test account (example@ynu.jp)
+await test("POST /api/auth/login - login with test account", async () => {
+    const { status, data } = await request("POST", "/api/auth/login", {
+        email: loginTestEmail,
+        password: "password"  // Correct password for test account
+    });
+    console.log(`   Response:`, data);
+    assert(status === 200, `Expected status 200, got ${status}`);
+    assert(data.data?.email === loginTestEmail, "Expected email to match");
+    assert(data.data?.handle === loginTestHandle, "Expected handle to match");
+});
+
 console.log(`\n${colors.blue}========================================${colors.reset}`);
 console.log(`${colors.green}Passed: ${testsPassed}${colors.reset}`);
 console.log(`${colors.red}Failed: ${testsFailed}${colors.reset}`);
