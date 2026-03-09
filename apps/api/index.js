@@ -1527,9 +1527,15 @@ app.get("/api/debug/table-schema/:tableName", async (req, res) => {
             WHERE table_schema = 'public'
               AND table_name = '${tableName}'
             ORDER BY ordinal_position
-            `,
+            `
         });
 
+        if (rpcResult.error) {
+            // Fallback: Use simple select with limit 0 to get column info
+            rpcResult = await supabase.from(tableName).select("*").limit(0);
+        }
+
+        const { data, error } = rpcResult;
         if (error) return res.status(500).json({ error: error.message });
         res.json({ tableName, columns: data });
     } catch (e) {
