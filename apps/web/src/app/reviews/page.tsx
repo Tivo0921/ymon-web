@@ -41,7 +41,21 @@ export default function ReviewsPage() {
     const [newCourseCategory, setNewCourseCategory] = useState<string>("専門");
     const [isAddingCourse, setIsAddingCourse] = useState(false);
     const [searchQuery, setSearchQuery] = useState<string>("");
+    const [courseAverages, setCourseAverages] = useState<Record<string, number>>({});
     const CATEGORIES = ["専門", "一般教養", "専門基礎"];
+
+    // 平均評価を計算するヘルパー関数
+    const getRatingAverage = (courseKey: string) => courseAverages[courseKey];
+
+    // 星表示のヘルパー関数
+    const renderStars = (rating: number) => {
+        if (!rating) return "評価なし";
+        const fullStars = Math.floor(rating);
+        const hasHalfStar = rating % 1 >= 0.5;
+        let stars = "★".repeat(fullStars);
+        if (hasHalfStar) stars += "☆";
+        return stars;
+    };
 
     // 検索クエリに基づいて授業をフィルタリング
     const filteredCourses = courses.filter((course) =>
@@ -55,7 +69,24 @@ export default function ReviewsPage() {
         const loadCourses = async () => {
             try {
                 const data = await apiFetch("/api/courses");
-                setCourses(data?.data ?? []);
+                const courseList = data?.data ?? [];
+                setCourses(courseList);
+
+                // 全ての授業のレビュー平均を先読み計算
+                const averages: Record<string, number> = {};
+                for (const course of courseList) {
+                    try {
+                        const reviewData = await apiFetch(`/api/reviews/${encodeURIComponent(course.key)}`);
+                        const reviews = reviewData?.data ?? [];
+                        if (reviews.length > 0) {
+                            const avg = reviews.reduce((sum: number, r: Review) => sum + r.rating, 0) / reviews.length;
+                            averages[course.key] = avg;
+                        }
+                    } catch (e) {
+                        // レビューがない場合などは無視
+                    }
+                }
+                setCourseAverages(averages);
             } catch (e: any) {
                 setErr(e?.message ?? String(e));
             }
@@ -73,7 +104,14 @@ export default function ReviewsPage() {
         const loadReviews = async () => {
             try {
                 const data = await apiFetch(`/api/reviews/${encodeURIComponent(selectedCourse.key)}`);
-                setReviews(data?.data ?? []);
+                const reviewList = data?.data ?? [];
+                setReviews(reviewList);
+
+                // 平均評価を計算
+                if (reviewList.length > 0) {
+                    const avg = reviewList.reduce((sum, r) => sum + r.rating, 0) / reviewList.length;
+                    setCourseAverages(prev => ({ ...prev, [selectedCourse.key]: avg }));
+                }
             } catch (e: any) {
                 setErr(e?.message ?? String(e));
             }
@@ -157,20 +195,23 @@ export default function ReviewsPage() {
 
     if (!handle) {
         return (
-            <main style={{ padding: 24 }}>
-                <h1>授業レビュー</h1>
-                <p>handle がありません。matchmaking から入り直してください。</p>
-                <button onClick={() => router.push("/matchmaking")} style={{ padding: 10 }}>
-                    matchmaking に戻る
-                </button>
+            <main style={{ padding: 0, maxWidth: "100%", margin: 0 }}>
+                <h1 style={{ backgroundColor: "#4CAF50", color: "white", padding: 24, margin: 0, fontSize: 32, fontWeight: "bold" }}>授業レビュー</h1>
+                <div style={{ padding: 24 }}>
+                    <p>handle がありません。matchmaking から入り直してください。</p>
+                    <button onClick={() => router.push("/matchmaking")} style={{ padding: 10 }}>
+                        matchmaking に戻る
+                    </button>
+                </div>
             </main>
         );
     }
 
     return (
-        <main style={{ padding: 24, maxWidth: 800, margin: "0 auto" }}>
-            <h1>授業レビュー</h1>
-            <p>handle: <b>{handle}</b></p>
+        <main style={{ padding: 0, maxWidth: "100%", margin: 0 }}>
+            <h1 style={{ backgroundColor: "#4CAF50", color: "white", padding: 24, margin: 0, fontSize: 32, fontWeight: "bold" }}>授業レビュー</h1>
+            <div style={{ padding: 24, maxWidth: 800, margin: "0 auto" }}>
+                <p>handle: <b>{sp.get("handle")}</b></p>
 
             <button
                 onClick={() => router.push(`/matchmaking?handle=${encodeURIComponent(handle)}`)}
@@ -216,28 +257,36 @@ export default function ReviewsPage() {
                                 {courses.length === 0 ? "授業データがありません" : "検索結果がありません"}
                             </p>
                         ) : (
-                            filteredCourses.map((course) => (
-                                <button
-                                    key={course.key}
-                                    onClick={() => setSelectedCourse(course)}
-                                    style={{
-                                        padding: 12,
-                                        textAlign: "left",
-                                        background: selectedCourse?.key === course.key ? "#4CAF50" : "#f0f0f0",
-                                        color: selectedCourse?.key === course.key ? "white" : "black",
-                                        border: "1px solid #999",
-                                        borderRadius: 4,
-                                        cursor: "pointer",
-                                        fontSize: 14,
-                                    }}
-                                >
-                                    <div style={{ fontWeight: "bold" }}>{course.display_name}</div>
-                                    <div style={{ fontSize: 12, opacity: 0.8 }}>（{course.category}）</div>
-                                    {course.professor_name && (
-                                        <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>{course.professor_name}</div>
-                                    )}
-                                </button>
-                            ))
+                            filteredCourses.map((course) => {
+                                const avg = getRatingAverage(course.key);
+                                return (
+                                    <button
+                                        key={course.key}
+                                        onClick={() => setSelectedCourse(course)}
+                                        style={{
+                                            padding: 12,
+                                            textAlign: "left",
+                                            background: selectedCourse?.key === course.key ? "#4CAF50" : "#f0f0f0",
+                                            color: selectedCourse?.key === course.key ? "white" : "black",
+                                            border: "1px solid #999",
+                                            borderRadius: 4,
+                                            cursor: "pointer",
+                                            fontSize: 14,
+                                        }}
+                                    >
+                                        <div style={{ fontWeight: "bold" }}>{course.display_name}</div>
+                                        <div style={{ fontSize: 12, opacity: 0.8 }}>（{course.category}）</div>
+                                        {course.professor_name && (
+                                            <div style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>{course.professor_name}</div>
+                                        )}
+                                        {avg && (
+                                            <div style={{ fontSize: 12, marginTop: 6, opacity: 0.9 }}>
+                                                {renderStars(avg)} {avg.toFixed(1)}
+                                            </div>
+                                        )}
+                                    </button>
+                                );
+                            })
                         )}
                     </div>
 
@@ -314,7 +363,7 @@ export default function ReviewsPage() {
                             style={{
                                 width: "100%",
                                 padding: 10,
-                                backgroundColor: isAddingCourse ? "#ccc" : "#2196F3",
+                                backgroundColor: isAddingCourse ? "#ccc" : "#4CAF50",
                                 color: "white",
                                 border: "none",
                                 borderRadius: 4,
@@ -423,6 +472,7 @@ export default function ReviewsPage() {
                         </p>
                     )}
                 </div>
+            </div>
             </div>
         </main>
     );
