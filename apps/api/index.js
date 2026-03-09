@@ -5,6 +5,7 @@ import { createClient } from "@supabase/supabase-js";
 import fs from "fs";
 import path from "path";
 import { fileURLToPath } from "url";
+import bcrypt from "bcrypt";
 
 dotenv.config();
 
@@ -71,25 +72,39 @@ app.get("/api/professors", async (_req, res) => {
 /** users: create-or-get */
 app.post("/api/users", async (req, res) => {
     try {
+        console.log("[POST /api/users] Request body:", req.body);
         const { handle, display_name } = req.body ?? {};
         if (!handle) return res.status(400).json({ error: "handle is required" });
 
+        console.log("[POST /api/users] Checking existing user with handle:", handle);
         const existing = await supabase
             .from("users")
             .select("id, handle, display_name, created_at")
             .eq("handle", handle)
             .maybeSingle();
 
-        if (existing.error) return res.status(500).json({ error: existing.error.message });
-        if (existing.data) return res.json({ data: existing.data, created: false });
+        if (existing.error) {
+            console.error("[POST /api/users] Existing user query error:", existing.error);
+            return res.status(500).json({ error: existing.error.message });
+        }
+        if (existing.data) {
+            console.log("[POST /api/users] User already exists:", existing.data);
+            return res.json({ data: existing.data, created: false });
+        }
 
+        console.log("[POST /api/users] Creating new user with handle:", handle, "display_name:", display_name);
         const created = await supabase
             .from("users")
             .insert([{ handle, display_name }])
             .select("id, handle, display_name, created_at")
             .single();
 
-        if (created.error) return res.status(500).json({ error: created.error.message });
+        if (created.error) {
+            console.error("[POST /api/users] User insert error:", created.error);
+            return res.status(500).json({ error: created.error.message });
+        }
+
+        console.log("[POST /api/users] User created successfully:", created.data);
 
         // デフォルト教授を付与（prof_0, prof_1, prof_2）
         const defaultProfessors = ["prof_0", "prof_1", "prof_2"];
@@ -98,16 +113,20 @@ app.post("/api/users", async (req, res) => {
             professor_key: key
         }));
 
+        console.log("[POST /api/users] Inserting default professors:", professorRecords);
         const professorInsert = await supabase
             .from("user_professors")
             .insert(professorRecords);
 
         if (professorInsert.error) {
+            console.error("[POST /api/users] Professor insert error:", professorInsert.error);
             return res.status(500).json({ error: `教授の追加に失敗: ${professorInsert.error.message}` });
         }
 
+        console.log("[POST /api/users] Successfully completed");
         return res.status(201).json({ data: created.data, created: true });
     } catch (e) {
+        console.error("[POST /api/users] Exception:", e);
         return res.status(500).json({ error: String(e) });
     }
 });
@@ -866,7 +885,7 @@ async function loadProfessors() {
         .from("professors")
         .select("*")
         .order("created_at", { ascending: true });
-    
+
     if (error) throw new Error(error.message);
     return data ?? [];
 }
@@ -1516,7 +1535,7 @@ app.get("/api/debug/table-schema/:tableName", async (req, res) => {
     }
 
     try {
-        const { data, error } = await supabase.rpc("execute_sql", {
+        let rpcResult = await supabase.rpc("execute_sql", {
             sql: `
             SELECT
                 column_name,
@@ -1527,12 +1546,395 @@ app.get("/api/debug/table-schema/:tableName", async (req, res) => {
             WHERE table_schema = 'public'
               AND table_name = '${tableName}'
             ORDER BY ordinal_position
-            `,
+            `
         });
 
+        if (rpcResult.error) {
+            // Fallback: Use simple select with limit 0 to get column info
+            rpcResult = await supabase.from(tableName).select("*").limit(0);
+        }
+
+        const { data, error } = rpcResult;
         if (error) return res.status(500).json({ error: error.message });
         res.json({ tableName, columns: data });
     } catch (e) {
         res.status(500).json({ error: String(e) });
+    }
+});
+
+// ===== Authentication (Supabase Auth) =====
+
+/** Auth: Signup with email and password */
+app.post("/api/auth/signup", async (req, res) => {
+    try {
+        console.log("[POST /api/auth/signup] Request body:", { email: req.body?.email });
+        const { email, password } = req.body ?? {};
+
+        if (!email || !password) {
+            return res.status(400).json({ error: "email and password are required" });
+        }
+
+        // Validate @ynu.jp email
+        if (!email.endsWith("@ynu.jp")) {
+            console.log("[POST /api/auth/signup] Invalid email domain:", email);
+            return res.status(400).json({ error: "Only @ynu.jp email addresses are allowed" });
+        }
+
+        // Validate password strength
+        if (password.length < 8) {
+            return res.status(400).json({ error: "Password must be at least 8 characters" });
+        }
+
+        // Check if email already exists
+        const { data: existingUser } = await supabase
+            .from("users")
+            .select("id")
+            .eq("email", email)
+            .maybeSingle();
+
+        if (existingUser) {
+            console.log("[POST /api/auth/signup] Email already exists:", email);
+            return res.status(400).json({ error: "Email already registered" });
+        }
+
+        // Create user in Supabase Auth
+        console.log("[POST /api/auth/signup] Creating auth user:", email);
+        const { data: authData, error: authError } = await supabase.auth.signUp({
+            email,
+            password,
+            options: {
+                emailRedirectTo: process.env.EMAIL_REDIRECT_TO ?? 'http://localhost:3000/auth/verify'
+            }
+        });
+
+        if (authError) {
+            console.error("[POST /api/auth/signup] Auth error:", authError);
+            return res.status(400).json({ error: authError.message });
+        }
+
+        console.log("[POST /api/auth/signup] Auth user created:", authData.user?.id);
+
+        // Generate a default handle (can be changed later)
+        const defaultHandle = `user_${authData.user.id.substring(0, 8)}`;
+
+        // Create corresponding user entry in users table (without handle - will be set later)
+        const { data: userData, error: userError } = await supabase
+            .from("users")
+            .insert([{
+                id: authData.user.id,
+                email,
+                email_verified: false,
+                handle: defaultHandle // Use temporary default handle
+            }])
+            .select("id, email, email_verified, handle")
+            .single();
+
+        if (userError) {
+            console.error("[POST /api/auth/signup] User table error:", userError);
+            return res.status(500).json({ error: userError.message });
+        }
+
+        console.log("[POST /api/auth/signup] User created successfully");
+
+        return res.status(200).json({
+            user: userData,
+            session: authData.session,
+            message: "User created. Please check your email for verification link."
+        });
+    } catch (e) {
+        console.error("[POST /api/auth/signup] Exception:", e);
+        return res.status(500).json({ error: String(e) });
+    }
+});
+
+/** Auth: Login with email and password */
+app.post("/api/auth/login", async (req, res) => {
+    try {
+        console.log("[POST /api/auth/login] Request body:", { email: req.body?.email });
+        const { email, password } = req.body ?? {};
+
+        if (!email || !password) {
+            return res.status(400).json({ error: "email and password are required" });
+        }
+
+        // Test account: example@ynu.jp (skip Supabase Auth, verify password from DB)
+        if (email === "example@ynu.jp") {
+            console.log("[POST /api/auth/login] Using test account:", email);
+            
+            // Get user data from DB including password hash
+            const { data: userData, error: userError } = await supabase
+                .from("users")
+                .select("id, email, handle, display_name, email_verified, created_at, password")
+                .eq("email", email)
+                .single();
+
+            if (userError || !userData) {
+                console.error("[POST /api/auth/login] Test user not found");
+                return res.status(401).json({ error: "Login failed" });
+            }
+
+            // Verify password using bcrypt
+            if (!userData.password) {
+                console.error("[POST /api/auth/login] No password hash for test user");
+                return res.status(401).json({ error: "Login failed" });
+            }
+
+            try {
+                console.log("[POST /api/auth/login] Comparing password...");
+                console.log("[POST /api/auth/login] Input password:", password);
+                console.log("[POST /api/auth/login] Stored hash:", userData.password);
+                const passwordMatch = await bcrypt.compare(password, userData.password);
+                console.log("[POST /api/auth/login] bcrypt.compare result:", passwordMatch);
+                if (!passwordMatch) {
+                    console.error("[POST /api/auth/login] Wrong password for test user");
+                    return res.status(401).json({ error: "Invalid email or password" });
+                }
+            } catch (bcryptError) {
+                console.error("[POST /api/auth/login] Bcrypt error:", bcryptError);
+                return res.status(401).json({ error: "Login failed" });
+            }
+
+            console.log("[POST /api/auth/login] Test user logged in:", userData.id);
+            return res.status(200).json({
+                data: {
+                    id: userData.id,
+                    email: userData.email,
+                    handle: userData.handle,
+                    display_name: userData.display_name,
+                    email_verified: userData.email_verified,
+                    created_at: userData.created_at
+                },
+                message: "Test account login successful"
+            });
+        }
+
+        // Sign in with email and password (normal users)
+        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+            email,
+            password
+        });
+
+        if (authError) {
+            console.error("[POST /api/auth/login] Auth error:", authError);
+            return res.status(401).json({ error: authError.message });
+        }
+
+        console.log("[POST /api/auth/login] User logged in:", authData.user?.id);
+
+        // Get user data including handle
+        const { data: userData, error: userError } = await supabase
+            .from("users")
+            .select("id, email, handle, display_name, email_verified, created_at")
+            .eq("id", authData.user.id)
+            .single();
+
+        if (userError) {
+            console.error("[POST /api/auth/login] User fetch error:", userError);
+            return res.status(500).json({ error: userError.message });
+        }
+
+        return res.status(200).json({
+            session: authData.session,
+            user: userData,
+            message: "Login successful"
+        });
+    } catch (e) {
+        console.error("[POST /api/auth/login] Exception:", e);
+        return res.status(500).json({ error: String(e) });
+    }
+});
+
+/** Auth: Set handle for authenticated user */
+app.post("/api/auth/set-handle", async (req, res) => {
+    try {
+        console.log("[POST /api/auth/set-handle] Request body:", { email: req.body?.email, handle: req.body?.handle });
+        const { email, handle } = req.body ?? {};
+
+        if (!email || !handle) {
+            return res.status(400).json({ error: "email and handle are required" });
+        }
+
+        // Get user by email
+        const { data: userData, error: userError } = await supabase
+            .from("users")
+            .select("id, handle")
+            .eq("email", email)
+            .single();
+
+        if (userError) {
+            console.error("[POST /api/auth/set-handle] User fetch error:", userError);
+            return res.status(404).json({ error: "User not found" });
+        }
+
+        const userId = userData.id;
+
+        // Check if handle already exists (for other users)
+        const { data: handleList, error: handleError } = await supabase
+            .from("users")
+            .select("id, handle")
+            .eq("handle", handle);
+
+        if (handleError) {
+            console.error("[POST /api/auth/set-handle] Handle check error:", handleError);
+        } else if (handleList && handleList.length > 0) {
+            const otherUser = handleList.find(u => u.id !== userId);
+            if (otherUser) {
+                console.log("[POST /api/auth/set-handle] Handle already taken:", handle);
+                return res.status(400).json({ error: "Handle is already taken" });
+            }
+        }
+
+        // Update handle
+        const { data: updated, error: updateError } = await supabase
+            .from("users")
+            .update({ handle })
+            .eq("id", userId)
+            .select("id, email, handle, display_name, email_verified, created_at")
+            .single();
+
+        if (updateError) {
+            console.error("[POST /api/auth/set-handle] Update error:", updateError);
+            return res.status(500).json({ error: updateError.message });
+        }
+
+        // Add default professors (only if not already added)
+        const existingProfs = await supabase
+            .from("user_professors")
+            .select("professor_key")
+            .eq("user_id", userId);
+
+        if (!existingProfs.error && (!existingProfs.data || existingProfs.data.length === 0)) {
+            const defaultProfessors = ["prof_0", "prof_1", "prof_2"];
+            const professorRecords = defaultProfessors.map(key => ({
+                user_id: userId,
+                professor_key: key
+            }));
+
+            const { error: professorError } = await supabase
+                .from("user_professors")
+                .insert(professorRecords);
+
+            if (professorError) {
+                console.error("[POST /api/auth/set-handle] Professor insert error:", professorError);
+                // Don't fail - user handle is set, professors can be added later
+            }
+        }
+
+        console.log("[POST /api/auth/set-handle] Handle set successfully");
+
+        return res.status(200).json({
+            user: updated,
+            message: "Handle set successfully"
+        });
+    } catch (e) {
+        console.error("[POST /api/auth/set-handle] Exception:", e);
+        return res.status(500).json({ error: String(e) });
+    }
+});
+
+/** Auth: Get user by email */
+app.get("/api/auth/user/:email", async (req, res) => {
+    try {
+        const email = decodeURIComponent(req.params.email);
+        console.log("[GET /api/auth/user] Email:", email);
+
+        const { data: userData, error: userError } = await supabase
+            .from("users")
+            .select("id, email, handle, display_name, email_verified, created_at")
+            .eq("email", email)
+            .single();
+
+        if (userError) {
+            console.error("[GET /api/auth/user] User fetch error:", userError);
+            return res.status(404).json({ error: "User not found" });
+        }
+
+        return res.status(200).json({
+            user: userData
+        });
+    } catch (e) {
+        console.error("[GET /api/auth/user] Exception:", e);
+        return res.status(500).json({ error: String(e) });
+    }
+});
+/** Auth: Change password (requires email and old password for verification) */
+app.post("/api/auth/change-password", async (req, res) => {
+    try {
+        console.log("[POST /api/auth/change-password] Request body:", { email: req.body?.email });
+        const { email, oldPassword, newPassword } = req.body ?? {};
+
+        if (!email || !oldPassword || !newPassword) {
+            return res.status(400).json({ error: "email, oldPassword, and newPassword are required" });
+        }
+
+        if (newPassword.length < 8) {
+            return res.status(400).json({ error: "New password must be at least 8 characters" });
+        }
+
+        // Test account: cannot change password
+        if (email === "example@ynu.jp") {
+            return res.status(403).json({ error: "Cannot change password for test account" });
+        }
+
+        // Verify old password by attempting login
+        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+            email,
+            oldPassword
+        });
+
+        if (authError) {
+            console.error("[POST /api/auth/change-password] Authentication failed:", authError);
+            return res.status(401).json({ error: "Current password is incorrect" });
+        }
+
+        // Update password using authenticated user
+        const { data: updateData, error: updateError } = await supabase.auth.updateUser(
+            { password: newPassword },
+            { 
+                headers: {
+                    Authorization: `Bearer ${authData.session?.access_token}`
+                }
+            }
+        );
+
+        if (updateError) {
+            console.error("[POST /api/auth/change-password] Update failed:", updateError);
+            return res.status(500).json({ error: "Failed to update password" });
+        }
+
+        console.log("[POST /api/auth/change-password] Password changed successfully");
+
+        return res.status(200).json({
+            message: "Password changed successfully"
+        });
+    } catch (e) {
+        console.error("[POST /api/auth/change-password] Exception:", e);
+        return res.status(500).json({ error: String(e) });
+    }
+});
+
+/** DEBUG: Check test account status */
+app.get("/api/debug/test-account", async (_req, res) => {
+    try {
+        // Check by handle
+        const { data: byHandle, error: handleError } = await supabase
+            .from("users")
+            .select("id, email, handle, display_name, password")
+            .eq("handle", "example")
+            .single();
+
+        // Check by email
+        const { data: byEmail, error: emailError } = await supabase
+            .from("users")
+            .select("id, email, handle, display_name, password")
+            .eq("email", "example@ynu.jp")
+            .maybeSingle();
+
+        return res.status(200).json({
+            byHandle: { data: byHandle, error: handleError },
+            byEmail: { data: byEmail, error: emailError }
+        });
+    } catch (e) {
+        return res.status(500).json({ error: String(e) });
     }
 });
