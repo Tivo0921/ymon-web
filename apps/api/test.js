@@ -87,6 +87,7 @@ await test("GET /api/users/:handle - should get user by handle", async () => {
     const { status, data } = await request("GET", `/api/users/${testHandle}`);
     assert(status === 200, `Expected status 200, got ${status}`);
     assert(data.data.handle === testHandle, "Expected handle to match");
+    assert(data.data.id === userId, "Expected user id to match the created user");
 });
 
 // Test 5: Get Circle Reviews (check initial count)

@@ -822,12 +822,19 @@ app.post("/api/circle-reviews", async (req, res) => {
             return res.status(400).json({ error: "handle, circle_key, rating, comment are required" });
         }
 
+        const parsedRating = Number.parseInt(rating, 10);
+        if (Number.isNaN(parsedRating) || !Number.isInteger(parsedRating)) {
+            console.log("Invalid rating value:", { rating });
+            return res.status(400).json({ error: "rating must be an integer between 1 and 5" });
+        }
+        const clampedRating = Math.max(1, Math.min(5, parsedRating));
+
         const review = await supabase
             .from("circle_reviews")
             .insert([{
                 circle_key,
                 author_handle: handle,
-                rating: Math.max(1, Math.min(5, rating)),
+                rating: clampedRating,
                 comment
             }])
             .select("id, circle_key, author_handle, rating, comment, created_at")
@@ -1481,7 +1488,7 @@ app.get("/api/debug/match/:matchId", async (req, res) => {
 });
 
 /** Table structure inspection (development only) */
-const ALLOWED_TABLE_NAMES = new Set([
+const ALLOWED_DEBUG_TABLES = new Set([
     "battle_states",
     "battle_turns",
     "battles",
@@ -1492,6 +1499,7 @@ const ALLOWED_TABLE_NAMES = new Set([
     "matchmaking_invitations",
     "matchmaking_queue",
     "professors",
+    "results",
     "reviews",
     "user_professors",
     "users",
@@ -1503,13 +1511,24 @@ app.get("/api/debug/table-schema/:tableName", async (req, res) => {
     }
 
     const tableName = req.params.tableName;
-
-    if (!ALLOWED_TABLE_NAMES.has(tableName)) {
-        return res.status(400).json({ error: "Unknown table name" });
+    if (!ALLOWED_DEBUG_TABLES.has(tableName)) {
+        return res.status(400).json({ error: "Invalid table name" });
     }
 
     try {
-        const { data, error } = await supabase.from(tableName).select("*").limit(0);
+        const { data, error } = await supabase.rpc("execute_sql", {
+            sql: `
+            SELECT
+                column_name,
+                data_type,
+                is_nullable,
+                column_default
+            FROM information_schema.columns
+            WHERE table_schema = 'public'
+              AND table_name = '${tableName}'
+            ORDER BY ordinal_position
+            `,
+        });
 
         if (error) return res.status(500).json({ error: error.message });
         res.json({ tableName, columns: data });
