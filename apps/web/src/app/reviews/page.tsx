@@ -214,10 +214,17 @@ export default function ReviewsPage() {
                 <p>handle: <b>{sp.get("handle")}</b></p>
 
             <button
+                onClick={() => router.push("/home")}
+                style={{ padding: 10, marginRight: 8, marginBottom: 16, backgroundColor: "#e0e0e0" }}
+            >
+                ← ホームに戻る
+            </button>
+
+            <button
                 onClick={() => router.push(`/matchmaking?handle=${encodeURIComponent(handle)}`)}
                 style={{ padding: 10, marginBottom: 16, backgroundColor: "#e0e0e0" }}
             >
-                ← matchmaking に戻る
+                マッチメイキングへ
             </button>
 
             {err && <div style={{ color: "crimson", marginBottom: 16, padding: 12, background: "#fee" }}>{err}</div>}

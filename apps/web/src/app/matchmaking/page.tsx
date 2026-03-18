@@ -6,7 +6,7 @@ import { apiFetch } from "@/lib/api";
 
 type LobbyPlayer = {
     user_id: string;
-    user: { id: string; handle: string; display_name: string; created_at: string } | null;
+    user: { id: string; handle: string; created_at: string } | null;
     mode: string;
     queued_at: string;
 };
@@ -15,7 +15,7 @@ type MatchRow = { id: string; p1_user_id: string; p2_user_id: string; status: st
 
 type Invitation = {
     invitation_id: string;
-    inviter: { id: string; handle: string; display_name: string } | null;
+    inviter: { id: string; handle: string } | null;
     status: string;
     created_at: string;
 };
@@ -224,6 +224,9 @@ export default function MatchmakingPage() {
                     <button onClick={() => router.push(`/circles?handle=${encodeURIComponent(handle)}`)} style={{ padding: 10 }}>
                         サークルレビューを見る
                     </button>
+                    <button onClick={() => router.push("/home")} style={{ padding: 10, background: "#666", color: "white" }}>
+                        ← ホームに戻る
+                    </button>
                 </div>
 
                 {err && <div style={{ color: "crimson", marginBottom: 12 }}>{err}</div>}
@@ -258,7 +261,7 @@ export default function MatchmakingPage() {
                         >
                             <h2 style={{ margin: "0 0 16px 0" }}>招待</h2>
                             <p style={{ fontSize: 16, margin: "8px 0" }}>
-                                <b>{invitation.inviter?.display_name}</b> さんと対戦しますか？
+                                <b>{invitation.inviter?.handle}</b> さんと対戦しますか？
                             </p>
                             <p style={{ fontSize: 12, opacity: 0.6, margin: "12px 0" }}>
                                 @{invitation.inviter?.handle}
@@ -328,7 +331,7 @@ export default function MatchmakingPage() {
                                     >
                                         <div>
                                             <div style={{ fontSize: 16, fontWeight: "bold" }}>
-                                                {player.user?.display_name || player.user?.handle}
+                                                {player.user?.handle}
                                             </div>
                                             <div style={{ fontSize: 12, opacity: 0.6 }}>
                                                 @{player.user?.handle}

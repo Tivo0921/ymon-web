@@ -1,10 +1,9 @@
 -- Test account for login testing
 -- This account does not have Supabase Auth user, only DB record for testing login API
-INSERT INTO public.users (email, handle, display_name, email_verified, created_at, updated_at)
+INSERT INTO public.users (email, handle, email_verified, created_at, updated_at)
 VALUES (
   'example@ynu.jp',
   'example',
-  'Example User',
   true,
   NOW(),
   NOW()

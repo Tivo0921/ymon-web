@@ -37,7 +37,7 @@ export default function CirclesPage() {
     const [successMsg, setSuccessMsg] = useState<string | null>(null);
     const [searchQuery, setSearchQuery] = useState<string>("");
     const [selectedCategory, setSelectedCategory] = useState<string>("全て");
-    
+
     // サークル追加フォーム用state
     const [isAddingCircle, setIsAddingCircle] = useState(false);
     const [addCircleKey, setAddCircleKey] = useState<string>("");
@@ -216,280 +216,287 @@ export default function CirclesPage() {
             <div style={{ padding: 24, maxWidth: 900, margin: "0 auto" }}>
                 <p>handle: <b>{handle}</b></p>
 
-            <button
-                onClick={() => router.push(`/matchmaking?handle=${encodeURIComponent(handle)}`)}
-                style={{ padding: 10, marginBottom: 16, backgroundColor: "#e0e0e0" }}
-            >
-                ← matchmaking に戻る
-            </button>
+                <button
+                    onClick={() => router.push("/home")}
+                    style={{ padding: 10, marginRight: 8, marginBottom: 16, backgroundColor: "#e0e0e0" }}
+                >
+                    ← ホームに戻る
+                </button>
 
-            {err && <div style={{ color: "crimson", marginBottom: 16, padding: 12, background: "#fee" }}>{err}</div>}
-            {successMsg && <div style={{ color: "#0056b3", marginBottom: 16, padding: 12, background: "#e3f2fd" }}>{successMsg}</div>}
+                <button
+                    onClick={() => router.push(`/matchmaking?handle=${encodeURIComponent(handle)}`)}
+                    style={{ padding: 10, marginBottom: 16, backgroundColor: "#e0e0e0" }}
+                >
+                    マッチメイキングへ
+                </button>
 
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
-                {/* サークル一覧 */}
-                <div style={{ border: "1px solid #bbdefb", padding: 16, borderRadius: 8, backgroundColor: "#f8fbff" }}>
-                    <h2>サークル一覧</h2>
+                {err && <div style={{ color: "crimson", marginBottom: 16, padding: 12, background: "#fee" }}>{err}</div>}
+                {successMsg && <div style={{ color: "#0056b3", marginBottom: 16, padding: 12, background: "#e3f2fd" }}>{successMsg}</div>}
 
-                    {/* カテゴリフィルタ */}
-                    <div style={{ marginBottom: 16 }}>
-                        <label style={{ display: "block", marginBottom: 8, fontWeight: "bold" }}>
-                            カテゴリ:
-                        </label>
-                        <select
-                            value={selectedCategory}
-                            onChange={(e) => setSelectedCategory(e.target.value)}
-                            style={{
-                                width: "100%",
-                                padding: 8,
-                                fontSize: 14,
-                                borderRadius: 4,
-                                border: "1px solid #ccc",
-                            }}
-                        >
-                            <option value="全て">全て</option>
-                            {CIRCLE_CATEGORIES.map((cat) => (
-                                <option key={cat} value={cat}>
-                                    {cat}
-                                </option>
-                            ))}
-                        </select>
-                    </div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 24 }}>
+                    {/* サークル一覧 */}
+                    <div style={{ border: "1px solid #bbdefb", padding: 16, borderRadius: 8, backgroundColor: "#f8fbff" }}>
+                        <h2>サークル一覧</h2>
 
-                    {/* 検索窓 */}
-                    <div style={{ marginBottom: 16 }}>
-                        <input
-                            type="text"
-                            placeholder="サークル名で検索..."
-                            value={searchQuery}
-                            onChange={(e) => setSearchQuery(e.target.value)}
-                            style={{
-                                width: "100%",
-                                padding: 10,
-                                fontSize: 14,
-                                borderRadius: 4,
-                                border: "1px solid #ccc",
-                                boxSizing: "border-box"
-                            }}
-                        />
-                        {searchQuery && (
-                            <p style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>
-                                {filteredCircles.length} 件表示
-                            </p>
-                        )}
-                    </div>
+                        {/* カテゴリフィルタ */}
+                        <div style={{ marginBottom: 16 }}>
+                            <label style={{ display: "block", marginBottom: 8, fontWeight: "bold" }}>
+                                カテゴリ:
+                            </label>
+                            <select
+                                value={selectedCategory}
+                                onChange={(e) => setSelectedCategory(e.target.value)}
+                                style={{
+                                    width: "100%",
+                                    padding: 8,
+                                    fontSize: 14,
+                                    borderRadius: 4,
+                                    border: "1px solid #ccc",
+                                }}
+                            >
+                                <option value="全て">全て</option>
+                                {CIRCLE_CATEGORIES.map((cat) => (
+                                    <option key={cat} value={cat}>
+                                        {cat}
+                                    </option>
+                                ))}
+                            </select>
+                        </div>
 
-                    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
-                        {filteredCircles.length === 0 ? (
-                            <p style={{ opacity: 0.6 }}>
-                                {circles.length === 0 ? "サークルデータがありません" : "検索結果がありません"}
-                            </p>
-                        ) : (
-                            filteredCircles.map((circle) => {
-                                const avg = getRatingAverage(circle.key);
-                                return (
-                                    <button
-                                        key={circle.key}
-                                        onClick={() => {
-                                            setSelectedCircle(circle);
-                                            setErr(null);
-                                            setSuccessMsg(null);
-                                            setRating(5);
-                                            setComment("");
-                                        }}
-                                        style={{
-                                            padding: 12,
-                                            textAlign: "left",
-                                            background: selectedCircle?.key === circle.key ? "#2196F3" : "#f0f0f0",
-                                            color: selectedCircle?.key === circle.key ? "white" : "black",
-                                            border: "1px solid #999",
-                                            borderRadius: 4,
-                                            cursor: "pointer",
-                                            fontSize: 14,
-                                        }}
-                                    >
-                                        <div style={{ fontWeight: "bold" }}>{circle.display_name}</div>
-                                        <div style={{ fontSize: 12, opacity: 0.8 }}>（{circle.category}）</div>
-                                        {avg && (
-                                            <div style={{ fontSize: 12, marginTop: 6, opacity: 0.9 }}>
-                                                {renderStars(avg)} {avg.toFixed(1)}
-                                            </div>
-                                        )}
-                                    </button>
-                                );
-                            })
-                        )}
-                    </div>
+                        {/* 検索窓 */}
+                        <div style={{ marginBottom: 16 }}>
+                            <input
+                                type="text"
+                                placeholder="サークル名で検索..."
+                                value={searchQuery}
+                                onChange={(e) => setSearchQuery(e.target.value)}
+                                style={{
+                                    width: "100%",
+                                    padding: 10,
+                                    fontSize: 14,
+                                    borderRadius: 4,
+                                    border: "1px solid #ccc",
+                                    boxSizing: "border-box"
+                                }}
+                            />
+                            {searchQuery && (
+                                <p style={{ fontSize: 12, opacity: 0.7, marginTop: 4 }}>
+                                    {filteredCircles.length} 件表示
+                                </p>
+                            )}
+                        </div>
 
-                    {/* サークル追加フォーム */}
-                    <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid #ddd" }}>
-                        <h3 style={{ marginBottom: 12 }}>新しいサークルを追加</h3>
-                        <input
-                            type="text"
-                            value={addCircleKey}
-                            onChange={(e) => setAddCircleKey(e.target.value)}
-                            placeholder="サークルキー（例：ai-club）"
-                            style={{
-                                width: "100%",
-                                padding: 8,
-                                marginBottom: 8,
-                                fontSize: 14,
-                                borderRadius: 4,
-                                border: "1px solid #ccc",
-                                boxSizing: "border-box"
-                            }}
-                        />
-                        <input
-                            type="text"
-                            value={addCircleDisplayName}
-                            onChange={(e) => setAddCircleDisplayName(e.target.value)}
-                            placeholder="サークル名（例：AI研究会）"
-                            style={{
-                                width: "100%",
-                                padding: 8,
-                                marginBottom: 8,
-                                fontSize: 14,
-                                borderRadius: 4,
-                                border: "1px solid #ccc",
-                                boxSizing: "border-box"
-                            }}
-                        />
-                        <select
-                            value={addCircleCategory}
-                            onChange={(e) => setAddCircleCategory(e.target.value)}
-                            style={{
-                                width: "100%",
-                                padding: 8,
-                                marginBottom: 8,
-                                fontSize: 14,
-                                borderRadius: 4,
-                                border: "1px solid #ccc",
-                                boxSizing: "border-box"
-                            }}
-                        >
-                            {CIRCLE_CATEGORIES.map((cat) => (
-                                <option key={cat} value={cat}>
-                                    {cat}
-                                </option>
-                            ))}
-                        </select>
-                        <button
-                            onClick={addCircle}
-                            disabled={isAddSubmitting}
-                            style={{
-                                width: "100%",
-                                padding: 10,
-                                backgroundColor: isAddSubmitting ? "#ccc" : "#2196F3",
-                                color: "white",
-                                border: "none",
-                                borderRadius: 4,
-                                cursor: isAddSubmitting ? "not-allowed" : "pointer",
-                                fontWeight: "bold"
-                            }}
-                        >
-                            {isAddSubmitting ? "追加中..." : "追加"}
-                        </button>
-                    </div>
-                </div>
-
-                {/* レビュー投稿・一覧 */}
-                <div style={{ border: "1px solid #bbdefb", padding: 16, borderRadius: 8, backgroundColor: "#f8fbff" }}>
-                    {selectedCircle ? (
-                        <>
-                            <h2>{selectedCircle.display_name}</h2>
-                            <p style={{ fontSize: 12, opacity: 0.7 }}>カテゴリ: {selectedCircle.category}</p>
-
-                            {/* レビュー投稿フォーム */}
-                            <div style={{ background: "#e3f2fd", padding: 12, marginBottom: 16, borderRadius: 4 }}>
-                                <h3>レビューを投稿</h3>
-                                <div style={{ marginBottom: 12 }}>
-                                    <label style={{ display: "block", marginBottom: 8 }}>
-                                        評価:
-                                        <select
-                                            value={rating}
-                                            onChange={(e) => setRating(Number(e.target.value))}
-                                            style={{ marginLeft: 8, padding: 6 }}
-                                        >
-                                            <option value={1}>⭐ 1 - 悪い</option>
-                                            <option value={2}>⭐⭐ 2</option>
-                                            <option value={3}>⭐⭐⭐ 3 - 普通</option>
-                                            <option value={4}>⭐⭐⭐⭐ 4</option>
-                                            <option value={5}>⭐⭐⭐⭐⭐ 5 - 良い</option>
-                                        </select>
-                                    </label>
-                                </div>
-                                <textarea
-                                    value={comment}
-                                    onChange={(e) => setComment(e.target.value)}
-                                    placeholder="コメントを入力..."
-                                    style={{
-                                        width: "100%",
-                                        minHeight: 100,
-                                        padding: 8,
-                                        fontFamily: "sans-serif",
-                                        fontSize: 14,
-                                        borderRadius: 4,
-                                        border: "1px solid #ccc",
-                                    }}
-                                />
-                                <button
-                                    onClick={submitReview}
-                                    disabled={isSubmitting}
-                                    style={{
-                                        marginTop: 8,
-                                        padding: 10,
-                                        backgroundColor: isSubmitting ? "#ccc" : "#2196F3",
-                                        color: "white",
-                                        border: "none",
-                                        borderRadius: 4,
-                                        cursor: isSubmitting ? "not-allowed" : "pointer",
-                                    }}
-                                >
-                                    {isSubmitting ? "投稿中..." : "投稿"}
-                                </button>
-                            </div>
-
-                            {/* レビュー一覧 */}
-                            <h3>レビュー ({reviews.length})</h3>
-                            <div style={{ maxHeight: 400, overflowY: "auto" }}>
-                                {reviews.length === 0 ? (
-                                    <p style={{ opacity: 0.6 }}>まだレビューがありません</p>
-                                ) : (
-                                    reviews.map((review) => (
-                                        <div
-                                            key={review.id}
+                        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                            {filteredCircles.length === 0 ? (
+                                <p style={{ opacity: 0.6 }}>
+                                    {circles.length === 0 ? "サークルデータがありません" : "検索結果がありません"}
+                                </p>
+                            ) : (
+                                filteredCircles.map((circle) => {
+                                    const avg = getRatingAverage(circle.key);
+                                    return (
+                                        <button
+                                            key={circle.key}
+                                            onClick={() => {
+                                                setSelectedCircle(circle);
+                                                setErr(null);
+                                                setSuccessMsg(null);
+                                                setRating(5);
+                                                setComment("");
+                                            }}
                                             style={{
                                                 padding: 12,
-                                                marginBottom: 8,
-                                                background: "#f5f5f5",
+                                                textAlign: "left",
+                                                background: selectedCircle?.key === circle.key ? "#2196F3" : "#f0f0f0",
+                                                color: selectedCircle?.key === circle.key ? "white" : "black",
+                                                border: "1px solid #999",
                                                 borderRadius: 4,
-                                                borderLeft: "4px solid #2196F3",
+                                                cursor: "pointer",
+                                                fontSize: 14,
                                             }}
                                         >
-                                            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-                                                <div>
-                                                    <div style={{ fontWeight: "bold" }}>{review.author_handle}</div>
-                                                    <div style={{ fontSize: 12, color: "#666" }}>
-                                                        {"⭐".repeat(review.rating)}
+                                            <div style={{ fontWeight: "bold" }}>{circle.display_name}</div>
+                                            <div style={{ fontSize: 12, opacity: 0.8 }}>（{circle.category}）</div>
+                                            {avg && (
+                                                <div style={{ fontSize: 12, marginTop: 6, opacity: 0.9 }}>
+                                                    {renderStars(avg)} {avg.toFixed(1)}
+                                                </div>
+                                            )}
+                                        </button>
+                                    );
+                                })
+                            )}
+                        </div>
+
+                        {/* サークル追加フォーム */}
+                        <div style={{ marginTop: 16, paddingTop: 16, borderTop: "1px solid #ddd" }}>
+                            <h3 style={{ marginBottom: 12 }}>新しいサークルを追加</h3>
+                            <input
+                                type="text"
+                                value={addCircleKey}
+                                onChange={(e) => setAddCircleKey(e.target.value)}
+                                placeholder="サークルキー（例：ai-club）"
+                                style={{
+                                    width: "100%",
+                                    padding: 8,
+                                    marginBottom: 8,
+                                    fontSize: 14,
+                                    borderRadius: 4,
+                                    border: "1px solid #ccc",
+                                    boxSizing: "border-box"
+                                }}
+                            />
+                            <input
+                                type="text"
+                                value={addCircleDisplayName}
+                                onChange={(e) => setAddCircleDisplayName(e.target.value)}
+                                placeholder="サークル名（例：AI研究会）"
+                                style={{
+                                    width: "100%",
+                                    padding: 8,
+                                    marginBottom: 8,
+                                    fontSize: 14,
+                                    borderRadius: 4,
+                                    border: "1px solid #ccc",
+                                    boxSizing: "border-box"
+                                }}
+                            />
+                            <select
+                                value={addCircleCategory}
+                                onChange={(e) => setAddCircleCategory(e.target.value)}
+                                style={{
+                                    width: "100%",
+                                    padding: 8,
+                                    marginBottom: 8,
+                                    fontSize: 14,
+                                    borderRadius: 4,
+                                    border: "1px solid #ccc",
+                                    boxSizing: "border-box"
+                                }}
+                            >
+                                {CIRCLE_CATEGORIES.map((cat) => (
+                                    <option key={cat} value={cat}>
+                                        {cat}
+                                    </option>
+                                ))}
+                            </select>
+                            <button
+                                onClick={addCircle}
+                                disabled={isAddSubmitting}
+                                style={{
+                                    width: "100%",
+                                    padding: 10,
+                                    backgroundColor: isAddSubmitting ? "#ccc" : "#2196F3",
+                                    color: "white",
+                                    border: "none",
+                                    borderRadius: 4,
+                                    cursor: isAddSubmitting ? "not-allowed" : "pointer",
+                                    fontWeight: "bold"
+                                }}
+                            >
+                                {isAddSubmitting ? "追加中..." : "追加"}
+                            </button>
+                        </div>
+                    </div>
+
+                    {/* レビュー投稿・一覧 */}
+                    <div style={{ border: "1px solid #bbdefb", padding: 16, borderRadius: 8, backgroundColor: "#f8fbff" }}>
+                        {selectedCircle ? (
+                            <>
+                                <h2>{selectedCircle.display_name}</h2>
+                                <p style={{ fontSize: 12, opacity: 0.7 }}>カテゴリ: {selectedCircle.category}</p>
+
+                                {/* レビュー投稿フォーム */}
+                                <div style={{ background: "#e3f2fd", padding: 12, marginBottom: 16, borderRadius: 4 }}>
+                                    <h3>レビューを投稿</h3>
+                                    <div style={{ marginBottom: 12 }}>
+                                        <label style={{ display: "block", marginBottom: 8 }}>
+                                            評価:
+                                            <select
+                                                value={rating}
+                                                onChange={(e) => setRating(Number(e.target.value))}
+                                                style={{ marginLeft: 8, padding: 6 }}
+                                            >
+                                                <option value={1}>⭐ 1 - 悪い</option>
+                                                <option value={2}>⭐⭐ 2</option>
+                                                <option value={3}>⭐⭐⭐ 3 - 普通</option>
+                                                <option value={4}>⭐⭐⭐⭐ 4</option>
+                                                <option value={5}>⭐⭐⭐⭐⭐ 5 - 良い</option>
+                                            </select>
+                                        </label>
+                                    </div>
+                                    <textarea
+                                        value={comment}
+                                        onChange={(e) => setComment(e.target.value)}
+                                        placeholder="コメントを入力..."
+                                        style={{
+                                            width: "100%",
+                                            minHeight: 100,
+                                            padding: 8,
+                                            fontFamily: "sans-serif",
+                                            fontSize: 14,
+                                            borderRadius: 4,
+                                            border: "1px solid #ccc",
+                                        }}
+                                    />
+                                    <button
+                                        onClick={submitReview}
+                                        disabled={isSubmitting}
+                                        style={{
+                                            marginTop: 8,
+                                            padding: 10,
+                                            backgroundColor: isSubmitting ? "#ccc" : "#2196F3",
+                                            color: "white",
+                                            border: "none",
+                                            borderRadius: 4,
+                                            cursor: isSubmitting ? "not-allowed" : "pointer",
+                                        }}
+                                    >
+                                        {isSubmitting ? "投稿中..." : "投稿"}
+                                    </button>
+                                </div>
+
+                                {/* レビュー一覧 */}
+                                <h3>レビュー ({reviews.length})</h3>
+                                <div style={{ maxHeight: 400, overflowY: "auto" }}>
+                                    {reviews.length === 0 ? (
+                                        <p style={{ opacity: 0.6 }}>まだレビューがありません</p>
+                                    ) : (
+                                        reviews.map((review) => (
+                                            <div
+                                                key={review.id}
+                                                style={{
+                                                    padding: 12,
+                                                    marginBottom: 8,
+                                                    background: "#f5f5f5",
+                                                    borderRadius: 4,
+                                                    borderLeft: "4px solid #2196F3",
+                                                }}
+                                            >
+                                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                                                    <div>
+                                                        <div style={{ fontWeight: "bold" }}>{review.author_handle}</div>
+                                                        <div style={{ fontSize: 12, color: "#666" }}>
+                                                            {"⭐".repeat(review.rating)}
+                                                        </div>
+                                                    </div>
+                                                    <div style={{ fontSize: 12, color: "#999" }}>
+                                                        {new Date(review.created_at).toLocaleDateString("ja-JP")}
                                                     </div>
                                                 </div>
-                                                <div style={{ fontSize: 12, color: "#999" }}>
-                                                    {new Date(review.created_at).toLocaleDateString("ja-JP")}
-                                                </div>
+                                                <p style={{ marginTop: 8, marginBottom: 0, fontSize: 14 }}>{review.comment}</p>
                                             </div>
-                                            <p style={{ marginTop: 8, marginBottom: 0, fontSize: 14 }}>{review.comment}</p>
-                                        </div>
-                                    ))
-                                )}
-                            </div>
-                        </>
-                    ) : (
-                        <p style={{ opacity: 0.6, textAlign: "center", padding: 40 }}>
-                            左からサークルを選択してください
-                        </p>
-                    )}
+                                        ))
+                                    )}
+                                </div>
+                            </>
+                        ) : (
+                            <p style={{ opacity: 0.6, textAlign: "center", padding: 40 }}>
+                                左からサークルを選択してください
+                            </p>
+                        )}
+                    </div>
                 </div>
-            </div>
             </div>
         </main>
     );

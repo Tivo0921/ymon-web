@@ -2,9 +2,6 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import { createClient } from "@supabase/supabase-js";
-import fs from "fs";
-import path from "path";
-import { fileURLToPath } from "url";
 import bcrypt from "bcrypt";
 
 dotenv.config();
@@ -15,16 +12,50 @@ app.use(express.json());
 
 const SUPABASE_URL = process.env.SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+const SUPABASE_ANON_KEY = process.env.SUPABASE_ANON_KEY;
 
-if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
-    console.error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY in .env");
+if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !SUPABASE_ANON_KEY) {
+    console.error("Missing SUPABASE_URL or SUPABASE_SERVICE_ROLE_KEY or SUPABASE_ANON_KEY in .env");
     process.exit(1);
 }
 
-const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
+// 管理者用: DB操作や Auth admin 用
+const supabaseAdmin = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY, {
+    auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+    },
+});
 
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+// 一般用: サインイン確認用
+const supabasePublic = createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+    },
+});
+
+// 既存コードとの互換のため、当面 supabase は admin を指す
+const supabase = supabaseAdmin;
+
+// Class periods (時限) - start time, end time (HH:MM)
+const CLASS_PERIODS = {
+    1: { name: "1限", start: "08:50", end: "10:20" },
+    2: { name: "2限", start: "10:30", end: "12:00" },
+    3: { name: "3限", start: "13:00", end: "14:30" },
+    4: { name: "4限", start: "14:40", end: "16:10" },
+    5: { name: "5限", start: "16:15", end: "17:45" },
+    6: { name: "6限", start: "17:50", end: "19:20" },
+    7: { name: "7限", start: "19:25", end: "20:55" },
+};
+
+// University campus coordinates (横国 理工学部講義棟A)
+// 将来的には classrooms テーブルで教室ごとに設定可能
+const CAMPUS_LOCATION = { latitude: 35.4736177, longitude: 139.5886936 };
+const CAMPUS_RADIUS_METERS = 500; // キャンパス半径 500m
+
+// IP whitelist (大学ネットワーク IP range)
+const ALLOWED_IP_PREFIX = ["133.34"];
 
 /** helpers */
 async function getUserIdByHandle(handle) {
@@ -42,13 +73,42 @@ async function getQueuedRowByUserId(userId) {
         .maybeSingle();
 }
 
-async function getOldestQueuedRowByMode(mode) {
-    return await supabase
-        .from("matchmaking_queue")
-        .select("id, user_id, mode, queued_at")
-        .eq("mode", mode)
-        .order("queued_at", { ascending: true })
-        .limit(1);
+// Check if current time is within any class period
+function getCurrentClassPeriod() {
+    const now = new Date();
+    const hours = String(now.getHours()).padStart(2, "0");
+    const minutes = String(now.getMinutes()).padStart(2, "0");
+    const currentTime = `${hours}:${minutes}`;
+
+    for (const [period, info] of Object.entries(CLASS_PERIODS)) {
+        if (currentTime >= info.start && currentTime <= info.end) {
+            return parseInt(period);
+        }
+    }
+    return null;
+}
+
+// Calculate distance between two coordinates (meters)
+function calculateDistance(lat1, lon1, lat2, lon2) {
+    const R = 6371000; // Earth radius in meters
+    const φ1 = (lat1 * Math.PI) / 180;
+    const φ2 = (lat2 * Math.PI) / 180;
+    const Δφ = ((lat2 - lat1) * Math.PI) / 180;
+    const Δλ = ((lon2 - lon1) * Math.PI) / 180;
+
+    const a =
+        Math.sin(Δφ / 2) * Math.sin(Δφ / 2) +
+        Math.cos(φ1) * Math.cos(φ2) * Math.sin(Δλ / 2) * Math.sin(Δλ / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+
+    return R * c;
+}
+
+// Check if IP is allowed (university network)
+function isIpAllowed(ip) {
+    // Extract client IP (handle proxy/load balancer)
+    const clientIp = ip || "0.0.0.0";
+    return ALLOWED_IP_PREFIX.some(prefix => clientIp.startsWith(prefix));
 }
 
 /** health */
@@ -73,13 +133,13 @@ app.get("/api/professors", async (_req, res) => {
 app.post("/api/users", async (req, res) => {
     try {
         console.log("[POST /api/users] Request body:", req.body);
-        const { handle, display_name } = req.body ?? {};
+        const { handle } = req.body ?? {};
         if (!handle) return res.status(400).json({ error: "handle is required" });
 
         console.log("[POST /api/users] Checking existing user with handle:", handle);
         const existing = await supabase
             .from("users")
-            .select("id, handle, display_name, created_at")
+            .select("id, handle, created_at")
             .eq("handle", handle)
             .maybeSingle();
 
@@ -92,11 +152,11 @@ app.post("/api/users", async (req, res) => {
             return res.json({ data: existing.data, created: false });
         }
 
-        console.log("[POST /api/users] Creating new user with handle:", handle, "display_name:", display_name);
+        console.log("[POST /api/users] Creating new user with handle:", handle);
         const created = await supabase
             .from("users")
-            .insert([{ handle, display_name }])
-            .select("id, handle, display_name, created_at")
+            .insert([{ handle }])
+            .select("id, handle, created_at")
             .single();
 
         if (created.error) {
@@ -138,7 +198,7 @@ app.get("/api/users", async (req, res) => {
 
         const { data, error } = await supabase
             .from("users")
-            .select("id, handle, display_name, created_at")
+            .select("id, handle, created_at")
             .order("created_at", { ascending: false })
             .limit(limit);
 
@@ -156,7 +216,7 @@ app.get("/api/users/:handle", async (req, res) => {
 
         const { data, error } = await supabase
             .from("users")
-            .select("id, handle, display_name, created_at")
+            .select("id, handle, created_at")
             .eq("handle", handle)
             .maybeSingle();
 
@@ -452,7 +512,7 @@ app.get("/api/matchmaking/lobby/:mode", async (req, res) => {
 
         const { data: users, error: usersError } = await supabase
             .from("users")
-            .select("id, handle, display_name, created_at")
+            .select("id, handle, created_at")
             .in("id", userIds);
 
         if (usersError) return res.status(500).json({ error: usersError.message });
@@ -569,7 +629,7 @@ app.get("/api/matchmaking/invitations/:handle", async (req, res) => {
 
         const { data: users, error: usersError } = await supabase
             .from("users")
-            .select("id, handle, display_name")
+            .select("id, handle")
             .in("id", inviterIds);
 
         if (usersError) return res.status(500).json({ error: usersError.message });
@@ -812,7 +872,7 @@ app.get("/api/circles", async (_req, res) => {
 app.post("/api/circles", async (req, res) => {
     try {
         const { key, display_name, category } = req.body ?? {};
-        
+
         if (!key || !display_name || !category) {
             return res.status(400).json({ error: "key, display_name, category are required" });
         }
@@ -915,9 +975,14 @@ app.post("/api/circle-reviews", async (req, res) => {
 // ===== Initialization =====
 
 const port = process.env.PORT || 3001;
-app.listen(port, () => {
-    console.log(`API running on http://localhost:${port}`);
-});
+
+if (process.env.NODE_ENV !== "test") {
+    app.listen(port, () => {
+        console.log(`API running on http://localhost:${port}`);
+    });
+}
+
+export default app;
 // ===== Battle (MVP) =====
 
 async function loadProfessors() {
@@ -1363,29 +1428,6 @@ app.post("/api/battles/:battleId/next-turn", async (req, res) => {
     }
 });
 
-app.get("/api/users/:handle/matches", async (req, res) => {
-    try {
-        const handle = req.params.handle;
-        const userId = await getUserIdByHandle(handle);
-        if (!userId) return res.status(404).json({ error: "user not found" });
-
-        const limit = Math.min(parseInt(req.query.limit ?? "20", 10) || 20, 50);
-
-        const m = await supabase
-            .from("matches")
-            .select("id, p1_user_id, p2_user_id, status, created_at")
-            .or(`p1_user_id.eq.${userId},p2_user_id.eq.${userId}`)
-            .order("created_at", { ascending: false })
-            .limit(limit);
-
-        if (m.error) return res.status(500).json({ error: m.error.message });
-
-        return res.json({ data: m.data ?? [] });
-    } catch (e) {
-        return res.status(500).json({ error: String(e) });
-    }
-});
-
 app.get("/api/matches/:matchId", async (req, res) => {
     try {
         const matchId = req.params.matchId;
@@ -1564,44 +1606,6 @@ const ALLOWED_DEBUG_TABLES = new Set([
     "users",
 ]);
 
-app.get("/api/debug/table-schema/:tableName", async (req, res) => {
-    if (process.env.NODE_ENV !== "development") {
-        return res.status(404).json({ error: "Not found" });
-    }
-
-    const tableName = req.params.tableName;
-    if (!ALLOWED_DEBUG_TABLES.has(tableName)) {
-        return res.status(400).json({ error: "Invalid table name" });
-    }
-
-    try {
-        let rpcResult = await supabase.rpc("execute_sql", {
-            sql: `
-            SELECT
-                column_name,
-                data_type,
-                is_nullable,
-                column_default
-            FROM information_schema.columns
-            WHERE table_schema = 'public'
-              AND table_name = '${tableName}'
-            ORDER BY ordinal_position
-            `
-        });
-
-        if (rpcResult.error) {
-            // Fallback: Use simple select with limit 0 to get column info
-            rpcResult = await supabase.from(tableName).select("*").limit(0);
-        }
-
-        const { data, error } = rpcResult;
-        if (error) return res.status(500).json({ error: error.message });
-        res.json({ tableName, columns: data });
-    } catch (e) {
-        res.status(500).json({ error: String(e) });
-    }
-});
-
 // ===== Authentication (Supabase Auth) =====
 
 /** Auth: Signup with email and password */
@@ -1666,7 +1670,7 @@ app.post("/api/auth/signup", async (req, res) => {
                 email_verified: false,
                 handle: defaultHandle // Use temporary default handle
             }])
-            .select("id, email, email_verified, handle")
+            .select("id, email, email_verified, handle, coin")
             .single();
 
         if (userError) {
@@ -1697,91 +1701,87 @@ app.post("/api/auth/login", async (req, res) => {
             return res.status(400).json({ error: "email and password are required" });
         }
 
-        // Test account: example@ynu.jp (skip Supabase Auth, verify password from DB)
-        if (email === "example@ynu.jp") {
-            console.log("[POST /api/auth/login] Using test account:", email);
-            
-            // Get user data from DB including password hash
-            const { data: userData, error: userError } = await supabase
-                .from("users")
-                .select("id, email, handle, display_name, email_verified, created_at, password")
-                .eq("email", email)
-                .single();
+        // Get user data from DB including password hash
+        const { data: userData, error: userError } = await supabase
+            .from("users")
+            .select("id, email, handle, coin, email_verified, created_at, password")
+            .eq("email", email)
+            .single();
 
-            if (userError || !userData) {
-                console.error("[POST /api/auth/login] Test user not found");
-                return res.status(401).json({ error: "Login failed" });
-            }
-
-            // Verify password using bcrypt
-            if (!userData.password) {
-                console.error("[POST /api/auth/login] No password hash for test user");
-                return res.status(401).json({ error: "Login failed" });
-            }
-
-            try {
-                console.log("[POST /api/auth/login] Comparing password...");
-                console.log("[POST /api/auth/login] Input password:", password);
-                console.log("[POST /api/auth/login] Stored hash:", userData.password);
-                const passwordMatch = await bcrypt.compare(password, userData.password);
-                console.log("[POST /api/auth/login] bcrypt.compare result:", passwordMatch);
-                if (!passwordMatch) {
-                    console.error("[POST /api/auth/login] Wrong password for test user");
-                    return res.status(401).json({ error: "Invalid email or password" });
-                }
-            } catch (bcryptError) {
-                console.error("[POST /api/auth/login] Bcrypt error:", bcryptError);
-                return res.status(401).json({ error: "Login failed" });
-            }
-
-            console.log("[POST /api/auth/login] Test user logged in:", userData.id);
-            return res.status(200).json({
-                data: {
-                    id: userData.id,
-                    email: userData.email,
-                    handle: userData.handle,
-                    display_name: userData.display_name,
-                    email_verified: userData.email_verified,
-                    created_at: userData.created_at
-                },
-                message: "Test account login successful"
-            });
+        if (userError || !userData) {
+            console.error("[POST /api/auth/login] Test user not found");
+            return res.status(401).json({ error: "Login failed" });
         }
+
+        // Verify password using bcrypt
+        if (!userData.password) {
+            console.error("[POST /api/auth/login] No password hash for test user");
+            return res.status(401).json({ error: "Login failed" });
+        }
+
+        try {
+            console.log("[POST /api/auth/login] Comparing password...");
+            console.log("[POST /api/auth/login] Input password:", password);
+            console.log("[POST /api/auth/login] Stored hash:", userData.password);
+            const passwordMatch = await bcrypt.compare(password, userData.password);
+            console.log("[POST /api/auth/login] bcrypt.compare result:", passwordMatch);
+            if (!passwordMatch) {
+                console.error("[POST /api/auth/login] Wrong password for test user");
+                return res.status(401).json({ error: "Invalid email or password" });
+            }
+        } catch (bcryptError) {
+            console.error("[POST /api/auth/login] Bcrypt error:", bcryptError);
+            return res.status(401).json({ error: "Login failed" });
+        }
+
+        console.log("[POST /api/auth/login] Test user logged in:", userData.id);
+        return res.status(200).json({
+            data: {
+                id: userData.id,
+                email: userData.email,
+                handle: userData.handle,
+                coin: userData.coin,
+                email_verified: userData.email_verified,
+                created_at: userData.created_at
+            },
+            message: "Test account login successful"
+        });
+    }
 
         // Sign in with email and password (normal users)
         const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
-            email,
-            password
-        });
+        email,
+        password
+    });
 
-        if (authError) {
-            console.error("[POST /api/auth/login] Auth error:", authError);
-            return res.status(401).json({ error: authError.message });
-        }
-
-        console.log("[POST /api/auth/login] User logged in:", authData.user?.id);
-
-        // Get user data including handle
-        const { data: userData, error: userError } = await supabase
-            .from("users")
-            .select("id, email, handle, display_name, email_verified, created_at")
-            .eq("id", authData.user.id)
-            .single();
-
-        if (userError) {
-            console.error("[POST /api/auth/login] User fetch error:", userError);
-            return res.status(500).json({ error: userError.message });
-        }
-
-        return res.status(200).json({
-            session: authData.session,
-            user: userData,
-            message: "Login successful"
-        });
-    } catch (e) {
-        console.error("[POST /api/auth/login] Exception:", e);
-        return res.status(500).json({ error: String(e) });
+    if (authError) {
+        console.error("[POST /api/auth/login] Auth error:", authError);
+        return res.status(401).json({ error: authError.message });
     }
+
+    console.log("[POST /api/auth/login] User logged in:", authData.user?.id);
+
+    // Get user data including handle and coin
+    const { data: userData, error: userError } = await supabase
+        .from("users")
+        .select("id, email, handle, coin, email_verified, created_at")
+        .eq("id", authData.user.id)
+        .single();
+
+    if (userError) {
+        console.error("[POST /api/auth/login] User fetch error:", userError);
+        return res.status(500).json({ error: userError.message });
+    }
+
+    return res.status(200).json({
+        session: authData.session,
+        user: userData,
+        message: "Login successful"
+    });
+} catch (e) {
+    console.error("[POST /api/auth/login] Exception:", e);
+    return res.status(500).json({ error: String(e) });
+}
 });
 
 /** Auth: Set handle for authenticated user */
@@ -1829,7 +1829,7 @@ app.post("/api/auth/set-handle", async (req, res) => {
             .from("users")
             .update({ handle })
             .eq("id", userId)
-            .select("id, email, handle, display_name, email_verified, created_at")
+            .select("id, email, handle, coin, email_verified, created_at")
             .single();
 
         if (updateError) {
@@ -1880,7 +1880,7 @@ app.get("/api/auth/user/:email", async (req, res) => {
 
         const { data: userData, error: userError } = await supabase
             .from("users")
-            .select("id, email, handle, display_name, email_verified, created_at")
+            .select("id, email, handle, coin, email_verified, created_at")
             .eq("email", email)
             .single();
 
@@ -1911,44 +1911,322 @@ app.post("/api/auth/change-password", async (req, res) => {
             return res.status(400).json({ error: "New password must be at least 8 characters" });
         }
 
-        // Test account: cannot change password
+        // テストアカウントは現行どおり変更不可
         if (email === "example@ynu.jp") {
             return res.status(403).json({ error: "Cannot change password for test account" });
         }
 
-        // Verify old password by attempting login
-        const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
+        // 1. 旧パスワード確認: 一般ユーザーとしてログインできるか確認
+        const { data: signInData, error: signInError } = await supabasePublic.auth.signInWithPassword({
             email,
-            oldPassword
+            password: oldPassword,
         });
 
-        if (authError) {
-            console.error("[POST /api/auth/change-password] Authentication failed:", authError);
+        if (signInError || !signInData?.user) {
+            console.error("[POST /api/auth/change-password] Authentication failed:", signInError);
             return res.status(401).json({ error: "Current password is incorrect" });
         }
 
-        // Update password using authenticated user
-        const { data: updateData, error: updateError } = await supabase.auth.updateUser(
-            { password: newPassword },
-            { 
-                headers: {
-                    Authorization: `Bearer ${authData.session?.access_token}`
-                }
-            }
+        // 2. 管理者権限でパスワード更新
+        const { data, error } = await supabaseAdmin.auth.admin.updateUserById(
+            signInData.user.id,
+            { password: newPassword }
         );
 
-        if (updateError) {
-            console.error("[POST /api/auth/change-password] Update failed:", updateError);
-            return res.status(500).json({ error: "Failed to update password" });
+        if (error) {
+            console.error("[POST /api/auth/change-password] Update failed:", error);
+            return res.status(500).json({ error: error.message });
         }
 
         console.log("[POST /api/auth/change-password] Password changed successfully");
 
         return res.status(200).json({
-            message: "Password changed successfully"
+            message: "Password changed successfully",
+            userId: data.user.id,
         });
     } catch (e) {
         console.error("[POST /api/auth/change-password] Exception:", e);
+        return res.status(500).json({ error: String(e) });
+    }
+});
+
+/** Auth: Update handle for authenticated user */
+app.post("/api/auth/update-handle", async (req, res) => {
+    try {
+        console.log("[POST /api/auth/update-handle] Request body:", { email: req.body?.email, newHandle: req.body?.newHandle });
+        const { email, newHandle } = req.body ?? {};
+
+        if (!email || !newHandle) {
+            return res.status(400).json({ error: "email and newHandle are required" });
+        }
+
+        // Validate newHandle (3+ chars, alphanumeric + underscore/hyphen)
+        if (newHandle.length < 3) {
+            return res.status(400).json({ error: "Handle must be at least 3 characters" });
+        }
+
+        if (!/^[a-zA-Z0-9_-]+$/.test(newHandle)) {
+            return res.status(400).json({ error: "Handle can only contain letters, numbers, underscores, and hyphens" });
+        }
+
+        // Get current user by email
+        const { data: userData, error: userError } = await supabase
+            .from("users")
+            .select("id, email, handle")
+            .eq("email", email)
+            .single();
+
+        if (userError || !userData) {
+            console.error("[POST /api/auth/update-handle] User fetch error:", userError);
+            return res.status(404).json({ error: "User not found" });
+        }
+
+        // Check if newHandle is already taken by another user
+        const { data: existingHandle } = await supabase
+            .from("users")
+            .select("id")
+            .eq("handle", newHandle)
+            .maybeSingle();
+
+        if (existingHandle && existingHandle.id !== userData.id) {
+            console.log("[POST /api/auth/update-handle] Handle already taken:", newHandle);
+            return res.status(409).json({ error: "Handle is already taken" });
+        }
+
+        // Update handle
+        const { data: updated, error: updateError } = await supabase
+            .from("users")
+            .update({ handle: newHandle })
+            .eq("id", userData.id)
+            .select("id, email, handle, coin, email_verified, created_at")
+            .single();
+
+        if (updateError) {
+            console.error("[POST /api/auth/update-handle] Update error:", updateError);
+            return res.status(500).json({ error: updateError.message });
+        }
+
+        console.log("[POST /api/auth/update-handle] Handle updated successfully:", newHandle);
+
+        return res.status(200).json({
+            user: updated,
+            message: "Handle updated successfully"
+        });
+    } catch (e) {
+        console.error("[POST /api/auth/update-handle] Exception:", e);
+        return res.status(500).json({ error: String(e) });
+    }
+});
+
+/** Auth: Check in and gain coins (with conditions: time, location, IP) */
+app.post("/api/auth/checkin", async (req, res) => {
+    try {
+        console.log("[POST /api/auth/checkin] Request body:", { email: req.body?.email });
+        const { email, latitude, longitude } = req.body ?? {};
+
+        if (!email) {
+            return res.status(400).json({ error: "email is required" });
+        }
+
+        // Get current user and coin balance
+        const { data: userData, error: userError } = await supabase
+            .from("users")
+            .select("id, email, handle, coin, email_verified, created_at")
+            .eq("email", email)
+            .single();
+
+        if (userError || !userData) {
+            console.error("[POST /api/auth/checkin] User fetch error:", userError);
+            return res.status(404).json({ error: "User not found" });
+        }
+
+        // === Condition 1: Check if current time is within class period ===
+        const currentPeriod = getCurrentClassPeriod();
+        if (!currentPeriod) {
+            return res.status(400).json({ error: "授業時間帯外です。授業時間内に出席してください。" });
+        }
+
+        // Get user's schedule for today
+        const now = new Date();
+        const weekday = now.getDay(); // 0=Sun, 1=Mon, etc.
+
+        const { data: schedule, error: scheduleError } = await supabase
+            .from("users_schedule")
+            .select("subject")
+            .eq("user_id", userData.id)
+            .eq("weekday", weekday)
+            .eq("period", currentPeriod)
+            .maybeSingle();
+
+        if (scheduleError) {
+            console.error("[POST /api/auth/checkin] Schedule fetch error:", scheduleError);
+            return res.status(500).json({ error: scheduleError.message });
+        }
+
+        if (!schedule) {
+            return res.status(400).json({ error: "この時間に授業がありません。" });
+        }
+
+        // === Condition 2: Check GPS location ===
+        if (latitude === undefined || longitude === undefined) {
+            return res.status(400).json({ error: "位置情報が必要です。位置情報許可を有効にしてください。" });
+        }
+
+        const distance = calculateDistance(CAMPUS_LOCATION.latitude, CAMPUS_LOCATION.longitude, latitude, longitude);
+        console.log(`[POST /api/auth/checkin] Distance from campus: ${distance.toFixed(2)}m`);
+
+        if (distance > CAMPUS_RADIUS_METERS) {
+            return res.status(400).json({
+                error: `キャンパス内にいません。キャンパスから ${distance.toFixed(0)}m 離れています。`
+            });
+        }
+
+        // === Condition 3: Check IP address ===
+        const clientIp = req.headers['x-forwarded-for'] || req.connection.remoteAddress || req.socket.remoteAddress;
+        console.log(`[POST /api/auth/checkin] Client IP: ${clientIp}`);
+
+        if (!isIpAllowed(clientIp)) {
+            return res.status(400).json({
+                error: "大学ネットワークからのアクセスが必要です。"
+            });
+        }
+
+        // All conditions passed - increment coin by 1
+        const newCoin = (userData.coin ?? 0) + 1;
+
+        // Update coin
+        const { data: updated, error: updateError } = await supabase
+            .from("users")
+            .update({ coin: newCoin })
+            .eq("id", userData.id)
+            .select("id, email, handle, coin, email_verified, created_at")
+            .single();
+
+        if (updateError) {
+            console.error("[POST /api/auth/checkin] Update error:", updateError);
+            return res.status(500).json({ error: updateError.message });
+        }
+
+        console.log("[POST /api/auth/checkin] Check-in successful, new coin count:", newCoin);
+
+        return res.status(200).json({
+            user: updated,
+            message: "出席しました！コイン +1",
+            checkinDetails: {
+                period: currentPeriod,
+                subject: schedule.subject,
+                distance: distance.toFixed(2),
+                ip: clientIp
+            }
+        });
+    } catch (e) {
+        console.error("[POST /api/auth/checkin] Exception:", e);
+        return res.status(500).json({ error: String(e) });
+    }
+});
+
+/** Schedule: Get user's schedule */
+app.get("/api/schedule/:handle", async (req, res) => {
+    try {
+        const handle = req.params.handle;
+        const userId = await getUserIdByHandle(handle);
+
+        if (!userId) {
+            return res.status(404).json({ error: "User not found" });
+        }
+
+        const { data, error } = await supabase
+            .from("users_schedule")
+            .select("id, weekday, period, subject, room")
+            .eq("user_id", userId)
+            .order("weekday", { ascending: true })
+            .order("period", { ascending: true });
+
+        if (error) {
+            return res.status(500).json({ error: error.message });
+        }
+
+        // Add period info (name, start time, end time)
+        const scheduleWithDetails = (data ?? []).map((item) => ({
+            ...item,
+            periodInfo: CLASS_PERIODS[item.period] || null,
+        }));
+
+        res.status(200).json({ data: scheduleWithDetails });
+    } catch (e) {
+        return res.status(500).json({ error: String(e) });
+    }
+});
+
+/** Schedule: Update user's schedule (upsert) */
+app.post("/api/schedule/:handle", async (req, res) => {
+    try {
+        const handle = req.params.handle;
+        const { weekday, period, subject, room } = req.body ?? {};
+
+        if (weekday === undefined || period === undefined) {
+            return res.status(400).json({ error: "weekday and period are required" });
+        }
+
+        if (weekday < 0 || weekday > 6 || period < 1 || period > 7) {
+            return res.status(400).json({ error: "Invalid weekday or period" });
+        }
+
+        const userId = await getUserIdByHandle(handle);
+        if (!userId) {
+            return res.status(404).json({ error: "User not found" });
+        }
+
+        // Upsert schedule
+        const { data, error } = await supabase
+            .from("users_schedule")
+            .upsert({
+                user_id: userId,
+                weekday,
+                period,
+                subject: subject || null,
+                room: room || null,
+            }, { onConflict: "user_id,weekday,period" })
+            .select("id, weekday, period, subject, room");
+
+        if (error) {
+            return res.status(500).json({ error: error.message });
+        }
+
+        res.status(200).json({ data: data?.[0] || null });
+    } catch (e) {
+        return res.status(500).json({ error: String(e) });
+    }
+});
+
+/** Schedule: Delete schedule entry */
+app.delete("/api/schedule/:handle", async (req, res) => {
+    try {
+        const handle = req.params.handle;
+        const { weekday, period } = req.body ?? {};
+
+        if (weekday === undefined || period === undefined) {
+            return res.status(400).json({ error: "weekday and period are required" });
+        }
+
+        const userId = await getUserIdByHandle(handle);
+        if (!userId) {
+            return res.status(404).json({ error: "User not found" });
+        }
+
+        const { error } = await supabase
+            .from("users_schedule")
+            .delete()
+            .eq("user_id", userId)
+            .eq("weekday", weekday)
+            .eq("period", period);
+
+        if (error) {
+            return res.status(500).json({ error: error.message });
+        }
+
+        res.status(200).json({ message: "Schedule deleted" });
+    } catch (e) {
         return res.status(500).json({ error: String(e) });
     }
 });
@@ -1959,14 +2237,14 @@ app.get("/api/debug/test-account", async (_req, res) => {
         // Check by handle
         const { data: byHandle, error: handleError } = await supabase
             .from("users")
-            .select("id, email, handle, display_name, password")
+            .select("id, email, handle, password")
             .eq("handle", "example")
             .single();
 
         // Check by email
         const { data: byEmail, error: emailError } = await supabase
             .from("users")
-            .select("id, email, handle, display_name, password")
+            .select("id, email, handle, password")
             .eq("email", "example@ynu.jp")
             .maybeSingle();
 
